@@ -442,20 +442,20 @@ const PRESETS = {
     const ns = cnt(o, 12);
     for (let i = 0; i < ns; i++) {
       p0(x + rr(-0.4, 0.4) * s, y + rr(0, 0.7) * s, z + rr(-0.4, 0.4) * s);
-      const j = rr(0.7, 1.3);
-      P.r = 0.16 * j; P.g = 0.10 * j; P.b = 0.22 * j;
+      const j = rr(0.75, 1.25);
+      P.r = 0.13 * j; P.g = 0.08 * j; P.b = 0.20 * j;
       const th = R() * Math.PI * 2;
       const sp = rr(0.1, 0.7);
       P.vx = Math.cos(th) * sp; P.vz = Math.sin(th) * sp;
       P.vy = rr(0.4, 1.1);
       P.drag = 1.8; P.spin = rr(-1.2, 1.2);
-      P.life = rr(1.0, 1.9); P.size = rr(0.45, 0.8) * s;
-      P.alpha = rr(0.26, 0.42); P.grow = 1.6;
+      P.life = rr(1.0, 1.9); P.size = rr(0.5, 0.9) * s;
+      P.alpha = rr(0.4, 0.58); P.grow = 1.6;
       P.fadeIn = 0.06;
       poolAlpha.spawn();
     }
     const nm = cnt(o, 14);
-    baseColor(o, 0.6, 0.34, 0.9);
+    baseColor(o, 0.5, 0.2, 1.0);
     for (let i = 0; i < nm; i++) {
       p0(x + rr(-0.5, 0.5) * s, y + rr(0.1, 0.9) * s, z + rr(-0.5, 0.5) * s);
       tint(0.75, 1.1);
@@ -477,14 +477,14 @@ const PRESETS = {
     for (let i = 0; i < n; i++) {
       p0(x + rr(-0.3, 0.3), y + rr(0, 0.3), z + rr(-0.3, 0.3));
       if (o && o.color != null) { baseColor(o, 1, 1, 1); tint(0.8, 1.1); }
-      else { P.r = rr(0.28, 0.45); P.g = rr(0.52, 0.72); P.b = rr(0.18, 0.3); }
+      else { P.r = rr(0.12, 0.24); P.g = rr(0.3, 0.48); P.b = rr(0.06, 0.14); }
       const th = R() * Math.PI * 2;
       const sp = rr(0.8, 2.6) * s;
       P.vx = Math.cos(th) * sp; P.vz = Math.sin(th) * sp;
       P.vy = rr(1.2, 3.2) * s;
       P.grav = 7; P.drag = 0.8; P.flut = 1.2;
       P.rot = R() * 6.28; P.spin = rr(-8, 8);
-      P.life = rr(0.7, 1.4); P.size = rr(0.09, 0.16) * s;
+      P.life = rr(0.7, 1.4); P.size = rr(0.11, 0.19) * s;
       P.fadeIn = 0; P.fadeOut = 0.2;
       poolLeaf.spawn();
     }
@@ -512,7 +512,7 @@ const PRESETS = {
   // 桃色の光粒がゆっくり上昇(回復)
   heal(x, y, z, o, s) {
     const n = cnt(o, 14);
-    baseColor(o, 1.0, 0.6, 0.72);
+    baseColor(o, 1.0, 0.4, 0.58);
     for (let i = 0; i < n; i++) {
       const th = R() * Math.PI * 2, rad = rr(0.15, 0.85) * s;
       p0(x + Math.cos(th) * rad, y + rr(0, 0.6), z + Math.sin(th) * rad);
@@ -528,7 +528,7 @@ const PRESETS = {
   // シアンの光が渦を巻いて上昇(気の珠・祠)
   orb(x, y, z, o, s) {
     const n = cnt(o, 18);
-    baseColor(o, 0.3, 0.92, 0.85);
+    baseColor(o, 0.1, 0.85, 0.8);
     for (let i = 0; i < n; i++) {
       const th = R() * Math.PI * 2, rad = rr(0.25, 0.8) * s;
       p0(x + Math.cos(th) * rad, y + rr(0, 0.5), z + Math.sin(th) * rad);
@@ -572,12 +572,12 @@ const PRESETS = {
   // 紫の魔力が弾ける
   magic(x, y, z, o, s) {
     p0(x, y, z);
-    baseColor(o, 0.68, 0.48, 1.05); tint(0.9, 1.0);
+    baseColor(o, 0.58, 0.32, 1.1); tint(0.9, 1.0);
     P.size = 0.85 * s; P.life = 0.16; P.alpha = 0.5; P.grow = 1.5;
     P.fadeIn = 0; P.fadeOut = 0.13;
     poolAdd.spawn();
     const n = cnt(o, 16);
-    baseColor(o, 0.58, 0.36, 0.98);
+    baseColor(o, 0.5, 0.22, 1.05);
     for (let i = 0; i < n; i++) {
       p0(x, y, z);
       tint(0.8, 1.1);
@@ -601,7 +601,7 @@ const PRESETS = {
       if (o && o.color != null) { baseColor(o, 1, 1, 1); tint(0.8, 1.1); }
       else {
         const k = R();
-        P.r = 0.3 + 0.25 * k; P.g = rr(0.5, 0.68); P.b = 0.16 + 0.1 * k;
+        P.r = 0.14 + 0.18 * k; P.g = rr(0.32, 0.5); P.b = 0.07 + 0.09 * k;
       }
       P.vx = rr(-0.3, 0.3); P.vz = rr(-0.3, 0.3);
       P.vy = rr(-0.5, -0.2);
@@ -676,7 +676,7 @@ function spawnForestLeaf(ctx, p) {
   const gy = ctx.getGroundHeight(_ax, _az);
   p0(_ax, gy + rr(3, 8), _az);
   const k = R();
-  P.r = 0.28 + 0.24 * k; P.g = rr(0.48, 0.66); P.b = 0.15 + 0.1 * k;
+  P.r = 0.14 + 0.18 * k; P.g = rr(0.3, 0.5); P.b = 0.07 + 0.09 * k;
   P.vx = rr(-0.3, 0.3); P.vy = rr(-0.55, -0.25); P.vz = rr(-0.3, 0.3);
   P.grav = 0.9; P.drag = 0.6; P.flut = 1.6;
   P.rot = R() * 6.28; P.spin = rr(-4, 4);

@@ -76,7 +76,7 @@ void main() {
     float h1 = hash13(cell);
     vec3 mwN = normalize(vec3(0.58, 0.18, 0.79));
     float bd = dot(d, mwN);
-    float band = exp(-bd * bd * 34.0);
+    float band = exp(-bd * bd * 55.0);
     vec3 j = vec3(hash13(cell + 17.1), hash13(cell + 31.7), hash13(cell + 47.3)) - 0.5;
     float sdist = length(f - j * 0.72);
     float thr = 0.986 - band * 0.03; // 天の川帯は星密度が上がる
@@ -88,10 +88,10 @@ void main() {
          * (star * tw * bright * nightAmt);
 
     // 天の川(帯 + まだら雲)
-    float pat = vnoise(d * 7.0) * 0.6 + vnoise(d * 16.0) * 0.4;
-    float mw = band * smoothstep(0.30, 0.75, pat);
-    col += vec3(0.52, 0.60, 0.85) * (mw * nightAmt * 0.24);
-    col += vec3(0.85, 0.82, 0.95) * (band * band * nightAmt * 0.05);
+    float pat = vnoise(d * 10.0) * 0.6 + vnoise(d * 24.0) * 0.4;
+    float mw = band * smoothstep(0.32, 0.78, pat);
+    col += vec3(0.52, 0.60, 0.85) * (mw * nightAmt * 0.17);
+    col += vec3(0.85, 0.82, 0.95) * (band * band * nightAmt * 0.035);
 
     // 月(海の模様 + 欠け + 淡い暈)
     float md = dot(d, uMoonDir);
@@ -131,8 +131,9 @@ function K(p, top, mid, hor, sun, glow, light, lightInt, hemiS, hemiG, hemiInt, 
 // p / 天頂 / 中間 / 地平線 / 太陽色 / 暈 / 直射光 / 強さ / 半球空 / 半球地 / 強さ / 雲 / 霧near / 霧far
 const KEYS = [
   K(0.000, 0x46508c, 0xc4737f, 0xf8c184, 0xffd9a6, 1.70, 0xffb27c, 1.15, 0x9a86a0, 0x4c4238, 0.50, 0xf0b49a, 130, 1150), // 夜明け(茜と金)
-  K(0.045, 0x4c78b8, 0x93b8d8, 0xf0d2a0, 0xffe8c0, 1.10, 0xffd9a8, 1.70, 0xaecce8, 0x5a6650, 0.75, 0xffe0cc, 170, 1300), // 朝
-  K(0.110, 0x4586d2, 0x82c4e8, 0xdcedec, 0xfff2d6, 0.65, 0xffedc8, 2.10, 0xc4e2f6, 0x66765c, 0.90, 0xfbfdfe, 220, 1500),
+  K(0.035, 0x4d5590, 0xd07f7d, 0xffc470, 0xffdca4, 1.50, 0xffc088, 1.50, 0xa695ae, 0x54483e, 0.62, 0xffcfa4, 150, 1250), // 朝焼けの盛り
+  K(0.085, 0x4c78b8, 0x93b8d8, 0xf0d2a0, 0xffe8c0, 1.00, 0xffd9a8, 1.80, 0xaecce8, 0x5a6650, 0.78, 0xffe0cc, 180, 1350), // 朝
+  K(0.140, 0x4586d2, 0x82c4e8, 0xdcedec, 0xfff2d6, 0.65, 0xffedc8, 2.10, 0xc4e2f6, 0x66765c, 0.90, 0xfbfdfe, 220, 1500),
   K(0.250, 0x3d7dd2, 0x7ec8e8, 0xdaeef2, 0xfff8e8, 0.50, 0xfff2d8, 2.30, 0xcfe9fa, 0x6c7c60, 0.95, 0xf6fafc, 260, 1600), // 正午(爽やかな青)
   K(0.400, 0x477fc4, 0x8ec2de, 0xe9dfc2, 0xffeecb, 0.70, 0xffe3b2, 2.00, 0xc6dff0, 0x68705a, 0.85, 0xfdf3e0, 210, 1450),
   K(0.470, 0x585a94, 0xc07a62, 0xffab54, 0xffcf88, 1.40, 0xffb571, 1.50, 0xa88690, 0x4e4438, 0.60, 0xffc49a, 160, 1300), // 黄昏の入り
@@ -334,7 +335,7 @@ export function update(ctx, dt) {
   _sunDir.set(Math.cos(a), Math.sin(a), 0.34).normalize();
   _moonDir.set(-Math.cos(a) * 0.92, -Math.sin(a), -0.42).normalize();
   const elev = _sunDir.y;
-  const nightF = 1 - smoothstep(-0.14, 0.06, elev);
+  const nightF = 1 - smoothstep(-0.16, -0.02, elev); // 星は日没後にのみ現れる
   const dayW = smoothstep(-0.12, 0.02, elev);
 
   // オーバーライドの滑らかなブレンド

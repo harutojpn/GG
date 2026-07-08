@@ -227,3 +227,578 @@ function setArmed(v, force) {
     shield.position.set(0, 0, 0); shield.rotation.set(0, 0, 0);
   }
 }
+
+// ---------------- 死亡 / 蘇生 ----------------
+let _ctx = null;
+function die() {
+  if (dead) return;
+  dead = true;
+  blocking = false;
+  spinExtra = 0;
+  action = { type: 'dead', t: 0, dur: 999 };
+  if (!diedEmitted) { diedEmitted = true; _ctx.emit('player-died'); }
+}
+function revive() {
+  dead = false; diedEmitted = false; action = null;
+  spinG.rotation.set(0, 0, 0); spinExtra = 0;
+  invulnT = 1.2; landT = 0; inner.visible = true;
+}
+
+// ---------------- init ----------------
+export async function init(ctx) {
+  _ctx = ctx;
+  buildModel();
+  vel = new THREE.Vector3();
+  root.position.copy(ctx.world.startPos);
+  root.position.y = ctx.getGroundHeight(root.position.x, root.position.z);
+  root.rotation.y = facing;
+  ctx.scene.add(root);
+  resetPose();
+  applyPose(1, 500); // 初期姿勢を即適用(タイトル背景用)
+
+  api = {
+    obj: root,
+    position: root.position,
+    heading: facing,
+    velocity: vel,
+    hp: 3.0, maxHp: 3.0,
+    stamina: 100, maxStamina: 100,
+    spiritOrbs: 0, gems: 0,
+    onGround: true, isRolling: false, isBlocking: false,
+
+    damage(amount, fromPos) {
+      if (dead || invulnT > 0) return;
+      if (action && action.type === 'roll') return; // ロール無敵
+      combatT = SHEATHE_DELAY;
+      setArmed(true);
+      let blocked = false;
+      if (blocking && fromPos) {
+        const ang = Math.atan2(fromPos.x - root.position.x, fromPos.z - root.position.z);
+        if (Math.abs(angleDelta(facing, ang)) <= 70 * Math.PI / 180) blocked = true;
+      }
+      // ノックバック方向
+      let kx = -Math.sin(facing), kz = -Math.cos(facing);
+      if (fromPos) {
+        const dx = root.position.x - fromPos.x, dz = root.position.z - fromPos.z;
+        const d = Math.hypot(dx, dz);
+        if (d > 1e-4) { kx = dx / d; kz = dz / d; }
+      }
+      if (blocked) {
+        amount *= 0.2;
+        vel.x += kx * 2.5; vel.z += kz * 2.5;
+        ctx.audio.play('block');
+        _fx.set(root.position.x + Math.sin(facing) * 0.55, root.position.y + 1.05, root.position.z + Math.cos(facing) * 0.55);
+        ctx.effects.burst(_fx, 'spark');
+      } else {
+        vel.x = kx * 6.5; vel.z = kz * 6.5;
+        if (onGround) vel.y = 2.5, onGround = false;
+        action = { type: 'hurt', t: 0, dur: HURT_TIME };
+        spinExtra = 0;
+        ctx.ui.flash('#ff2222', 0.25);
+        ctx.audio.play('damage');
+        _fx.set(root.position.x, root.position.y + 1.0, root.position.z);
+        ctx.effects.burst(_fx, 'hit');
+      }
+      invulnT = INVULN_TIME;
+      api.hp = clamp(api.hp - amount, 0, api.maxHp);
+      ctx.emit('player-damaged', { hp: api.hp, amount });
+      if (api.hp <= 0) die();
+    },
+
+    heal(amount) {
+      api.hp = clamp(api.hp + amount, 0, api.maxHp);
+      if (dead && api.hp > 0) revive();
+    },
+
+    addMaxHeart() { api.maxHp += 1; api.hp = api.maxHp; },
+
+    getAttackHit() {
+      if (!action || action.type !== 'atk') return null;
+      const A = ATTACKS[action.idx];
+      const k = action.t / A.dur;
+      if (k < A.a0 || k > A.a1) return null;
+      _hitPos.set(
+        root.position.x + Math.sin(facing) * 1.3,
+        root.position.y + 1.0,
+        root.position.z + Math.cos(facing) * 1.3);
+      _hit.damage = A.dmg;
+      _hit.swingId = action.swingId;
+      return _hit;
+    },
+
+    teleport(pos, heading = Math.PI) {
+      root.position.copy(pos);
+      facing = heading;
+      api.heading = heading;
+      root.rotation.y = heading;
+      vel.set(0, 0, 0);
+      if (!dead) {
+        action = null; spinG.rotation.set(0, 0, 0); spinExtra = 0;
+        inner.visible = true;
+      }
+      blocking = false; api.isBlocking = false; api.isRolling = false;
+      onGround = true; api.onGround = true;
+      runPhase = 0; prevStepSin = 0; moveAmt = 0; landT = 0;
+    },
+
+    setFrozen(v) {
+      frozen = !!v;
+      if (frozen) {
+        blocking = false; attackBuf = 0;
+        if (action && action.type !== 'dead') { action = null; spinG.rotation.x = 0; spinExtra = 0; }
+        vel.x = 0; vel.z = 0;
+      }
+    },
+  };
+  ctx.player = api;
+}
+
+// ---------------- アクション開始 ----------------
+function startAttack(ctx, idx) {
+  setArmed(true);
+  attackBuf = 0;
+  swingSeq++;
+  action = { type: 'atk', idx, t: 0, dur: ATTACKS[idx].dur, swingId: swingSeq, sfxDone: false };
+  combatT = SHEATHE_DELAY;
+  blocking = false;
+  spinExtra = 0;
+  const lock = ctx.camera3p ? ctx.camera3p.lockTarget : null;
+  if (!lock && _mv.lengthSq() > 0.5) facing = Math.atan2(_mv.x, _mv.z);
+}
+
+function startRoll(ctx, hasMove) {
+  api.stamina = clamp(api.stamina - ROLL_COST, 0, api.maxStamina);
+  regenDelay = REGEN_DELAY;
+  if (api.stamina <= 0) exhaustT = EXHAUST_TIME;
+  const dir = hasMove ? Math.atan2(_mv.x, _mv.z) : facing;
+  action = { type: 'roll', t: 0, dur: ROLL_TIME, dx: Math.sin(dir), dz: Math.cos(dir) };
+  facing = dir;
+  attackBuf = 0;
+  blocking = false;
+  ctx.audio.play('roll');
+  footBurst(ctx, 0);
+}
+
+function footBurst(ctx, which) {
+  const m = which === 1 ? bootR : which === 2 ? bootL : null;
+  if (m) m.getWorldPosition(_fx);
+  else { _fx.copy(root.position); _fx.y += 0.06; }
+  ctx.effects.burst(_fx, 'dust');
+}
+
+// ---------------- update ----------------
+export function update(ctx, dt) {
+  if (!api) return;
+  elapsed += dt;
+  const pos = root.position;
+  const inp = ctx.input;
+  const canControl = !frozen && !dead;
+
+  // ---- タイマー ----
+  if (invulnT > 0) invulnT -= dt;
+  if (attackBuf > 0) attackBuf -= dt;
+  if (landT > 0) landT -= dt;
+  if (exhaustT > 0) exhaustT -= dt;
+  if (regenDelay > 0) regenDelay -= dt;
+  else api.stamina = clamp(api.stamina + REGEN_RATE * dt, 0, api.maxStamina);
+
+  // ---- カメラ相対の移動入力 ----
+  let f = 0, s = 0;
+  if (canControl) {
+    f = (inp.keys.has('KeyW') || inp.keys.has('ArrowUp') ? 1 : 0) - (inp.keys.has('KeyS') || inp.keys.has('ArrowDown') ? 1 : 0);
+    s = (inp.keys.has('KeyD') || inp.keys.has('ArrowRight') ? 1 : 0) - (inp.keys.has('KeyA') || inp.keys.has('ArrowLeft') ? 1 : 0);
+  }
+  ctx.camera.getWorldDirection(_fwd);
+  _fwd.y = 0;
+  if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
+  _fwd.normalize();
+  _rgt.set(-_fwd.z, 0, _fwd.x);
+  _mv.set(_fwd.x * f + _rgt.x * s, 0, _fwd.z * f + _rgt.z * s);
+  const hasMove = _mv.lengthSq() > 1e-6;
+  if (hasMove) _mv.normalize();
+
+  // ---- ロックオン ----
+  const lock = ctx.camera3p ? ctx.camera3p.lockTarget : null;
+  const locked = !!(lock && lock.alive !== false && lock.pos);
+  const lockAng = locked ? Math.atan2(lock.pos.x - pos.x, lock.pos.z - pos.z) : 0;
+
+  // ---- ガード ----
+  const wantBlock = canControl && !action && onGround && (inp.mouse.right || inp.keys.has('KeyK'));
+  if (wantBlock && !blocking) { setArmed(true); combatT = SHEATHE_DELAY; }
+  blocking = wantBlock;
+
+  // ---- 攻撃入力(バッファ) ----
+  if (canControl && (inp.mouse.leftJust || inp.justPressed('KeyJ'))) attackBuf = 0.30;
+
+  // ---- アクション開始 ----
+  if (canControl && !action && onGround) {
+    if (attackBuf > 0) startAttack(ctx, 0);
+    else if (inp.justPressed('KeyC') && exhaustT <= 0 && api.stamina >= ROLL_COST) startRoll(ctx, hasMove);
+    else if (inp.justPressed('Space')) {
+      vel.y = JUMP_V; onGround = false; blocking = false;
+      ctx.audio.play('jump');
+      footBurst(ctx, 0);
+    }
+  }
+
+  // ---- 移動 / ダッシュ ----
+  const wl = ctx.world && ctx.world.waterLevel !== undefined ? ctx.world.waterLevel : -1e9;
+  const wading = pos.y < wl + 0.4;
+  let dashing = false;
+  if (!action) {
+    let spd = 0;
+    if (hasMove) {
+      spd = RUN_SPEED;
+      if (canControl && onGround && !blocking && exhaustT <= 0 && api.stamina > 0 &&
+          (inp.keys.has('ShiftLeft') || inp.keys.has('ShiftRight'))) {
+        dashing = true;
+        spd *= DASH_MUL;
+        api.stamina = clamp(api.stamina - DASH_COST * dt, 0, api.maxStamina);
+        regenDelay = REGEN_DELAY;
+        if (api.stamina <= 0) exhaustT = EXHAUST_TIME;
+      }
+      if (blocking) spd *= 0.5;
+      if (wading) spd *= 0.5;
+      if (locked) facing = dampAngle(facing, lockAng, 14, dt);
+      else facing = dampAngle(facing, Math.atan2(_mv.x, _mv.z), dashing ? 15 : 11, dt);
+    } else if (locked) {
+      facing = dampAngle(facing, lockAng, 14, dt);
+    }
+    const rate = onGround ? 12 : 3.5;
+    vel.x = damp(vel.x, _mv.x * spd, rate, dt);
+    vel.z = damp(vel.z, _mv.z * spd, rate, dt);
+  } else {
+    // ---- アクション進行 ----
+    action.t += dt;
+    const k = action.t / action.dur;
+    if (action.type === 'atk') {
+      const A = ATTACKS[action.idx];
+      if (!action.sfxDone && k >= A.a0 - 0.10) { action.sfxDone = true; ctx.audio.play(A.sfx); }
+      const lungeK = smoothstep(A.a0 - 0.10, A.a0 + 0.10, k) * (1 - smoothstep(A.a1, A.a1 + 0.14, k));
+      vel.x = damp(vel.x, Math.sin(facing) * A.lunge * lungeK, 18, dt);
+      vel.z = damp(vel.z, Math.cos(facing) * A.lunge * lungeK, 18, dt);
+      if (k < A.a0) {
+        if (locked) facing = dampAngle(facing, lockAng, 16, dt);
+        else if (hasMove) facing = dampAngle(facing, Math.atan2(_mv.x, _mv.z), 10, dt);
+      }
+      if (k >= 1) {
+        if (attackBuf > 0 && action.idx < 2 && onGround && canControl) startAttack(ctx, action.idx + 1);
+        else { action = null; spinExtra = 0; }
+      }
+    } else if (action.type === 'roll') {
+      const sp = ROLL_SPEED * (1 - 0.55 * smoothstep(0.55, 1, k)) * (wading ? 0.5 : 1);
+      vel.x = action.dx * sp; vel.z = action.dz * sp;
+      if (k >= 1) { action = null; spinG.rotation.x = 0; }
+    } else if (action.type === 'hurt') {
+      vel.x = damp(vel.x, 0, 5, dt); vel.z = damp(vel.z, 0, 5, dt);
+      if (action.t >= action.dur) action = null;
+    } else if (action.type === 'dead') {
+      vel.x = damp(vel.x, 0, 8, dt); vel.z = damp(vel.z, 0, 8, dt);
+    }
+  }
+
+  // ---- 物理 ----
+  if (!onGround) vel.y += GRAVITY * dt;
+  pos.x += vel.x * dt;
+  pos.z += vel.z * dt;
+  pos.y += vel.y * dt;
+
+  // 円柱コライダー押し出し
+  const cols = ctx.colliders;
+  for (let i = 0; i < cols.length; i++) {
+    const c = cols[i];
+    const dx = pos.x - c.x, dz = pos.z - c.z;
+    const rr = c.radius + PLAYER_R;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= rr * rr || d2 < 1e-8) continue;
+    if (c.height !== undefined && pos.y > ctx.getGroundHeight(c.x, c.z) + c.height) continue;
+    const d = Math.sqrt(d2), push = (rr - d) / d;
+    pos.x += dx * push; pos.z += dz * push;
+  }
+
+  // 移動範囲制限
+  const b = ctx.playerBounds;
+  if (b) { pos.x = clamp(pos.x, b.minX, b.maxX); pos.z = clamp(pos.z, b.minZ, b.maxZ); }
+
+  // 接地・着地
+  const gh = ctx.getGroundHeight(pos.x, pos.z);
+  if (pos.y <= gh) {
+    if (!onGround) {
+      landHeavy = vel.y < -14;
+      landT = landHeavy ? 0.26 : 0.15;
+      ctx.audio.play('land');
+      footBurst(ctx, 0);
+    }
+    pos.y = gh; vel.y = 0; onGround = true;
+  } else if (onGround) {
+    if (pos.y - gh < 0.4) pos.y = gh;
+    else onGround = false;
+  }
+
+  // ---- 自動納刀(戦闘後4秒) ----
+  if (armed) {
+    if (blocking || (action && action.type === 'atk')) combatT = SHEATHE_DELAY;
+    else {
+      combatT -= dt;
+      if (combatT <= 0 && !action) setArmed(false);
+    }
+  }
+
+  // ---- 足音・走行サイクル ----
+  const hSpeed = Math.hypot(vel.x, vel.z);
+  const sN = clamp(hSpeed / RUN_SPEED, 0, 1.8);
+  moveAmt = damp(moveAmt, onGround && hSpeed > 0.6 ? 1 : 0, 10, dt);
+  if (onGround && !action && hSpeed > 0.4) {
+    runPhase += dt * (4.5 + hSpeed * 1.3);
+    const stepSin = Math.sin(runPhase);
+    if (hSpeed > 2.2 && prevStepSin * stepSin <= 0 && prevStepSin !== stepSin) {
+      ctx.audio.play('step');
+      footBurst(ctx, prevStepSin < 0 ? 1 : 2);
+    }
+    prevStepSin = stepSin;
+  } else prevStepSin = 0;
+
+  // ---- ポーズ計算 ----
+  resetPose();
+  let rate = 14;
+  if (dead && action) rate = poseDead(action.t);
+  else if (action && action.type === 'roll') rate = poseRoll(clamp(action.t / ROLL_TIME, 0, 1));
+  else if (action && action.type === 'atk') rate = poseAttack(action.idx, clamp(action.t / ATTACKS[action.idx].dur, 0, 1));
+  else if (action && action.type === 'hurt') rate = poseHurt(action.t / HURT_TIME);
+  else if (!onGround) rate = poseAir(vel.y);
+  else {
+    if (moveAmt > 0.06) poseMove(sN, dashing, locked);
+    else poseIdle(elapsed, dt);
+    if (blocking) poseBlockOverlay();
+    if (landT > 0) poseLandOverlay();
+  }
+  if (exhaustT > 0 && !action && onGround) { PT.torsoRX += 0.12; PT.headRX += 0.16; }
+
+  applyPose(dt, rate);
+  if (!action) spinG.rotation.x = damp(spinG.rotation.x, 0, 20, dt);
+  root.rotation.y = facing + spinExtra;
+
+  // ---- 頭巾の揺れ(二次アニメ) ----
+  const capSway = Math.sin(elapsed * 2.2) * 0.05 + Math.sin(runPhase * 2) * 0.10 * moveAmt;
+  capMid.rotation.x = damp(capMid.rotation.x, -0.5 - moveAmt * 0.38 - clamp(vel.y * 0.022, -0.3, 0.3) + capSway, 8, dt);
+  capTip.rotation.x = damp(capTip.rotation.x, -0.42 - moveAmt * 0.30 + Math.sin(elapsed * 2.2 + 0.9) * 0.07 + Math.sin(runPhase * 2 + 1.2) * 0.13 * moveAmt, 7, dt);
+  capMid.rotation.z = damp(capMid.rotation.z, Math.sin(elapsed * 1.7) * 0.05, 6, dt);
+
+  // ---- まばたき ----
+  blinkT -= dt;
+  if (blinkT <= 0) { blinkT = 2 + Math.random() * 3.5; blinkAnim = 0.13; }
+  if (blinkAnim > 0) blinkAnim -= dt;
+  eyeR.scale.y = damp(eyeR.scale.y, blinkAnim > 0 ? 0.12 : 1, 30, dt);
+  eyeL.scale.y = eyeR.scale.y;
+
+  // ---- 被弾無敵の点滅 ----
+  inner.visible = dead || !(invulnT > 0 && Math.floor(invulnT * 14) % 2 === 0);
+
+  // ---- 公開状態の同期 ----
+  api.onGround = onGround;
+  api.isRolling = !!(action && action.type === 'roll');
+  api.isBlocking = blocking;
+  api.heading = facing;
+}
+
+// ---------------- ポーズ(状態別) ----------------
+const easeOut3 = (u) => { u = clamp(u, 0, 1); return 1 - (1 - u) * (1 - u) * (1 - u); };
+
+function poseIdle(t, dt) {
+  const br = Math.sin(t * 1.7); // 呼吸
+  PT.torsoRX = 0.035 + br * 0.022;
+  PT.hipsY = -0.012 + br * 0.010;
+  PT.shRZ_R = -0.14 - br * 0.02;
+  PT.shRZ_L = 0.14 + br * 0.02;
+  PT.elbR_ = (armed ? 0.52 : 0.28) + br * 0.03;
+  PT.elbL_ = (armed ? 0.42 : 0.28) + br * 0.03;
+  PT.legR_ = -0.045; PT.legL_ = 0.055;
+  PT.kneeR_ = 0.09; PT.kneeL_ = 0.06;
+  // 時々あたりを見回す
+  idleT += dt;
+  if (lookT > 0) {
+    lookT -= dt;
+    const env = Math.sin(clamp(1 - lookT / 1.5, 0, 1) * Math.PI);
+    PT.headRY = lookDir * env;
+    PT.headRX = 0.05 * env;
+    PT.torsoRY = lookDir * env * 0.14;
+  } else if (idleT >= lookNext) {
+    idleT = 0;
+    lookNext = 2.5 + Math.random() * 4;
+    lookT = 1.5;
+    lookDir = (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.35);
+  }
+}
+
+function poseMove(sN, dashing, locked) {
+  idleT = 0; lookT = 0;
+  const ph = runPhase;
+  const w = clamp(sN, 0, 1);
+  const legAmp = 0.28 + 0.36 * w + (dashing ? 0.11 : 0);
+  const armAmp = 0.30 + 0.40 * w + (dashing ? 0.15 : 0);
+  const sR = Math.sin(ph), sL = -sR;
+  const cR = Math.cos(ph);
+  PT.legR_ = -sR * legAmp; PT.legL_ = -sL * legAmp;
+  PT.kneeR_ = Math.max(0, cR) * (0.5 + 0.6 * w);
+  PT.kneeL_ = Math.max(0, -cR) * (0.5 + 0.6 * w);
+  PT.shRX_R = sR * armAmp; PT.shRX_L = sL * armAmp;
+  PT.elbR_ = 0.35 + Math.max(0, -sR) * 0.55 + (armed ? 0.12 : 0);
+  PT.elbL_ = 0.35 + Math.max(0, -sL) * 0.55;
+  PT.shRZ_R = -0.12; PT.shRZ_L = 0.12;
+  PT.torsoRX = 0.05 + w * 0.10 + (dashing ? 0.18 : 0); // 前傾(ダッシュで強く)
+  PT.torsoRY = sR * 0.07;
+  PT.hipsY = (-0.05 + Math.abs(cR) * 0.05) * w;
+  PT.headRX = -PT.torsoRX * 0.55;
+  if (locked) { // ストレイフ: 脚は移動方向へ・上体は対象へ
+    const la = angleDelta(facing, Math.atan2(_mv.x, _mv.z));
+    PT.hipsRY = clamp(la * 0.45, -0.85, 0.85);
+    PT.torsoRZ = -Math.sin(la) * 0.07;
+  }
+}
+
+function poseAir(vy) {
+  const up = clamp(vy / JUMP_V, -1, 1);
+  PT.torsoRX = 0.13 - up * 0.07;
+  PT.legR_ = -0.58 + up * 0.10; PT.kneeR_ = 1.05;
+  PT.legL_ = 0.32; PT.kneeL_ = 0.5;
+  PT.shRX_R = -0.5 - up * 0.3; PT.shRZ_R = -0.6;
+  PT.shRX_L = -0.5 - up * 0.3; PT.shRZ_L = 0.6;
+  PT.elbR_ = 0.55; PT.elbL_ = 0.55;
+  PT.headRX = vy < 0 ? 0.12 : -0.08;
+  return 10;
+}
+
+function poseLandOverlay() {
+  const c = clamp(landT / (landHeavy ? 0.26 : 0.15), 0, 1) * (landHeavy ? 1 : 0.5);
+  PT.hipsY -= 0.22 * c;
+  PT.kneeR_ += 0.95 * c; PT.kneeL_ += 0.95 * c;
+  PT.legR_ -= 0.48 * c; PT.legL_ -= 0.42 * c;
+  PT.torsoRX += 0.32 * c;
+  PT.shRX_R -= 0.3 * c; PT.shRX_L -= 0.3 * c;
+}
+
+function poseBlockOverlay() {
+  PT.shRX_L = -1.05; PT.shRZ_L = -0.18; PT.elbL_ = 1.3;
+  PT.shRX_R = 0.35; PT.shRZ_R = -0.4; PT.elbR_ = 0.8;
+  PT.torsoRX += 0.10; PT.torsoRY = 0.22;
+  PT.hipsY -= 0.06;
+  PT.legR_ -= 0.16; PT.legL_ += 0.13;
+  PT.kneeR_ += 0.28; PT.kneeL_ += 0.16;
+  PT.headRX = -0.04;
+}
+
+function poseAttack(idx, k) {
+  idleT = 0;
+  if (idx === 0) { // 一段目: 右薙ぎ(右へ大きく溜めて左へ振り抜く)
+    const w = smoothstep(0, 0.20, k);
+    const s = easeOut3((k - 0.24) / 0.30);
+    const rec = smoothstep(0.80, 1, k);
+    PT.torsoRY = lerp(-0.85 * w, 0.95, s) * (1 - rec * 0.45);
+    PT.torsoRX = 0.10 + s * 0.16;
+    PT.shRX_R = lerp(lerp(0.15, -0.40, w), -1.35, s);
+    PT.shRZ_R = lerp(lerp(-0.12, -1.15, w), 0.45, s);
+    PT.elbR_ = lerp(lerp(0.45, 1.05, w), 0.10, s);
+    PT.shRX_L = lerp(0.1, 0.55, s); PT.shRZ_L = 0.38; PT.elbL_ = 0.7;
+    PT.hipsY = -0.05 - s * 0.03;
+    PT.legR_ = -0.38 * s; PT.legL_ = 0.30 * s;
+    PT.kneeR_ = 0.30; PT.kneeL_ = 0.26;
+    PT.headRY = -PT.torsoRY * 0.45;
+    return k < 0.24 ? 16 : 30;
+  }
+  if (idx === 1) { // 二段目: 左薙ぎ(返しの逆袈裟)
+    const w = smoothstep(0, 0.22, k);
+    const s = easeOut3((k - 0.26) / 0.30);
+    const rec = smoothstep(0.82, 1, k);
+    PT.torsoRY = lerp(0.90 * w, -0.95, s) * (1 - rec * 0.45);
+    PT.torsoRX = 0.12 + s * 0.12;
+    PT.shRX_R = lerp(lerp(-0.4, -0.85, w), -1.25, s);
+    PT.shRZ_R = lerp(lerp(0.1, 0.75, w), -1.25, s);
+    PT.elbR_ = lerp(lerp(0.5, 1.15, w), 0.14, s);
+    PT.shRX_L = 0.3; PT.shRZ_L = lerp(0.2, 0.8, s); PT.elbL_ = 0.6;
+    PT.hipsY = -0.06;
+    PT.legR_ = 0.30 * s; PT.legL_ = -0.38 * s;
+    PT.kneeR_ = 0.26; PT.kneeL_ = 0.30;
+    PT.headRY = -PT.torsoRY * 0.45;
+    return k < 0.26 ? 16 : 30;
+  }
+  // 三段目: 大振り回転斬り(全身が一回転)
+  const w = smoothstep(0, 0.24, k);
+  const s = easeOut3((k - 0.26) / 0.42);
+  spinExtra = Math.PI * 2 * easeOut3((k - 0.26) / 0.52);
+  if (k >= 0.99) spinExtra = 0;
+  PT.torsoRY = lerp(-0.9 * w, -0.15, s);
+  PT.torsoRX = 0.16 + w * 0.10;
+  PT.shRX_R = lerp(lerp(0.15, -0.5, w), -0.9, s);
+  PT.shRZ_R = lerp(lerp(-0.12, -0.55, w), -1.5, s); // 腕を水平に伸ばして薙ぐ
+  PT.elbR_ = lerp(lerp(0.45, 1.2, w), 0.05, s);
+  PT.shRX_L = -0.35; PT.shRZ_L = lerp(0.2, 0.95, s); PT.elbL_ = 0.45;
+  PT.hipsY = -0.10 - Math.sin(clamp(s, 0, 1) * Math.PI) * 0.07;
+  PT.legR_ = -0.32; PT.legL_ = 0.36;
+  PT.kneeR_ = 0.45; PT.kneeL_ = 0.52;
+  PT.headRY = 0.1;
+  return k < 0.24 ? 15 : 26;
+}
+
+function poseRoll(k) {
+  // 前転: easeInOut で一回転
+  const e = k < 0.5 ? 2 * k * k : 1 - (2 - 2 * k) * (2 - 2 * k) / 2;
+  spinG.rotation.x = Math.PI * 2 * e;
+  PT.hipsY = -0.32;
+  PT.torsoRX = 0.85; PT.headRX = 0.6;
+  PT.legR_ = -1.65; PT.legL_ = -1.55;
+  PT.kneeR_ = 2.2; PT.kneeL_ = 2.3;
+  PT.shRX_R = -0.9; PT.shRZ_R = -0.35; PT.elbR_ = 2.1;
+  PT.shRX_L = -0.9; PT.shRZ_L = 0.35; PT.elbL_ = 2.1;
+  return 26;
+}
+
+function poseHurt(k) {
+  const c = Math.sin(clamp(k, 0, 1) * Math.PI); // のけぞって戻る
+  PT.torsoRX = -0.40 * c;
+  PT.headRX = -0.32 * c;
+  PT.shRX_R = -0.5 * c; PT.shRZ_R = -0.75 * c - 0.1;
+  PT.shRX_L = -0.5 * c; PT.shRZ_L = 0.75 * c + 0.1;
+  PT.elbR_ = 0.8; PT.elbL_ = 0.8;
+  PT.hipsY = -0.06 * c;
+  PT.legR_ = -0.28 * c; PT.kneeR_ = 0.45 * c;
+  PT.legL_ = 0.15 * c;
+  return 22;
+}
+
+function poseDead(t) {
+  const k1 = smoothstep(0, 0.5, t);    // 膝から崩れ落ちる
+  const k2 = smoothstep(0.65, 1.35, t); // 前へ倒れ込む
+  PT.hipsY = -0.52 * k1 - 0.14 * k2;
+  PT.kneeR_ = 2.35 * k1; PT.kneeL_ = 2.35 * k1;
+  PT.legR_ = 0.12 * k1; PT.legL_ = 0.12 * k1;
+  PT.torsoRX = 0.22 * k1 + 0.6 * k2;
+  PT.headRX = 0.28 * k1 + 0.4 * k2;
+  PT.shRX_R = 0.2 * k1 - 0.55 * k2; PT.shRZ_R = -0.3;
+  PT.shRX_L = 0.2 * k1 - 0.55 * k2; PT.shRZ_L = 0.3;
+  PT.elbR_ = 0.3; PT.elbL_ = 0.3;
+  spinG.rotation.x = 1.15 * k2;
+  return 8;
+}
+
+// ---------------- ポーズ適用(dampブレンド) ----------------
+function applyPose(dt, rate) {
+  const D = (o, p, v) => { o[p] = damp(o[p], v, rate, dt); };
+  D(hips.position, 'y', 0.88 + PT.hipsY);
+  D(hips.rotation, 'y', PT.hipsRY);
+  D(torso.rotation, 'x', PT.torsoRX);
+  D(torso.rotation, 'y', PT.torsoRY - PT.hipsRY);
+  D(torso.rotation, 'z', PT.torsoRZ);
+  D(headG.rotation, 'x', PT.headRX - PT.torsoRX * 0.4);
+  D(headG.rotation, 'y', PT.headRY);
+  D(headG.rotation, 'z', PT.headRZ);
+  D(shR.rotation, 'x', PT.shRX_R);
+  D(shR.rotation, 'z', PT.shRZ_R);
+  D(elbR.rotation, 'x', -Math.max(0, PT.elbR_));
+  D(shL.rotation, 'x', PT.shRX_L);
+  D(shL.rotation, 'z', PT.shRZ_L);
+  D(elbL.rotation, 'x', -Math.max(0, PT.elbL_));
+  D(legR.rotation, 'x', PT.legR_);
+  D(kneeR.rotation, 'x', Math.max(0, PT.kneeR_));
+  D(legL.rotation, 'x', PT.legL_);
+  D(kneeL.rotation, 'x', Math.max(0, PT.kneeL_));
+}
