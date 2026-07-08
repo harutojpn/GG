@@ -1,0 +1,17 @@
+{
+  "name": "hyria-no-densetsu",
+  "version": "1.0.0",
+  "description": "幻想の大地ハイリアを冒険する、ゼルダの伝説へのオマージュ 3D オープンフィールドアクション",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --format=iife --outfile=dist/game.js",
+    "build:dev": "esbuild src/main.js --bundle --format=iife --outfile=dist/game.js --sourcemap",
+    "serve": "npx http-server -p 8080 -c-1 ."
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}
