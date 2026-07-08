@@ -221,7 +221,8 @@ function buildClouds(scene) {
   let geo = null;
   try { geo = mergeGeometries(puffs); } catch { geo = null; }
   if (!geo) geo = puffs[0];
-  cloudMat = toonMaterial(0xf6fafc, { flatShading: true });
+  geo.computeVertexNormals(); // 非インデックス → フラットな面法線(低ポリの柔らかい塊)
+  cloudMat = toonMaterial(0xf6fafc);
   clouds = new THREE.InstancedMesh(geo, cloudMat, CLOUD_N);
   clouds.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   clouds.castShadow = false;
