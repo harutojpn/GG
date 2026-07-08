@@ -141,6 +141,8 @@ function updateFollow(ctx, dt) {
   const ease = smoothstep(0, 1, followT);
   const lookRate = lerp(2.2, 12, ease);
   const distRate = lerp(1.8, 6, ease);
+  // 復帰中のみ、極端な見上げ/見下ろしを心地よい角度へ寄せる(操作とは競合しない)
+  if (followT < 1) pitch = damp(pitch, clamp(pitch, 0.12, 0.85), (1 - ease) * 2.5, dt);
 
   // --- 注視点: 頭上1.6m(ロック中は対象方向へ少しだけブレンド) ---
   _a.copy(pl.position);
