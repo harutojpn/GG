@@ -948,12 +948,14 @@ function openModal(kind) {
   if (kind === 'settings') syncSettings();
   R.modal.classList.toggle('wide', kind === 'controls');
   R.modal.classList.add('open');
+  root.classList.add('modal-open');
 }
 
 function closeModal(silent) {
   if (!modal.open) return;
   modal.open = false;
   R.modal.classList.remove('open');
+  root.classList.remove('modal-open');
   if (!silent && C.audio && C.audio.play) C.audio.play('uiBack');
 }
 

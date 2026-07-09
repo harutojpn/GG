@@ -189,6 +189,12 @@ const _e = new THREE.Euler();
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
 
+// 面法線を立てる(非インデックスジオメトリをローポリのフラット陰影に)
+function facet(geo) {
+  geo.computeVertexNormals();
+  return geo;
+}
+
 // 頂点カラー属性を一色で塗る(マージ後も色が残る)
 function colorize(geo, hex) {
   const c = new THREE.Color(hex);
@@ -199,9 +205,9 @@ function colorize(geo, hex) {
   return geo;
 }
 
-// 変換を焼き込んだクローンを配列へ
+// 変換を焼き込んだクローンを配列へ(マージ互換のため非インデックス化)
 function pushGeo(list, geo, x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) {
-  const g = geo.clone();
+  const g = geo.index ? geo.toNonIndexed() : geo.clone();
   _e.set(rx, ry, rz); _q.setFromEuler(_e);
   _p.set(x, y, z); _s.set(sx, sy, sz);
   _m4.compose(_p, _q, _s);
@@ -318,10 +324,13 @@ function buildTerrain(ctx) {
   }
 
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geo.computeVertexNormals();
+  // MeshToonMaterial は flatShading 非対応 → 非インデックス化 + 面法線でローポリの陰影に
+  const flatGeo = geo.toNonIndexed();
+  flatGeo.computeVertexNormals();
+  geo.dispose();
 
-  const mat = toonMaterial(0xffffff, { vertexColors: true, flatShading: true });
-  const mesh = new THREE.Mesh(geo, mat);
+  const mat = toonMaterial(0xffffff, { vertexColors: true });
+  const mesh = new THREE.Mesh(flatGeo, mat);
   mesh.receiveShadow = true;
   mesh.name = 'terrain';
   ctx.scene.add(mesh);
@@ -334,18 +343,28 @@ const waterUniform = { value: 0 };
 function buildWater(ctx) {
   const geo = new THREE.PlaneGeometry(4800, 4800, 120, 120);
   geo.rotateX(-Math.PI / 2);
-  const mat = toonMaterial(0x3f8fb0, {
-    transparent: true, opacity: 0.72, flatShading: true,
-  });
+  const mat = toonMaterial(0x3f8fb0, { transparent: true, opacity: 0.72 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = waterUniform;
-    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-      transformed.y += sin(position.x * 0.045 + uTime * 0.9) * 0.2
-                     + cos(position.z * 0.052 + uTime * 0.7) * 0.2
-                     + sin((position.x + position.z) * 0.021 + uTime * 0.45) * 0.28;`
-    );
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+        {
+          float ddx = 0.009 * cos(position.x * 0.045 + uTime * 0.9)
+                    + 0.0059 * cos((position.x + position.z) * 0.021 + uTime * 0.45);
+          float ddz = -0.0104 * sin(position.z * 0.052 + uTime * 0.7)
+                    + 0.0059 * cos((position.x + position.z) * 0.021 + uTime * 0.45);
+          objectNormal = normalize(vec3(-ddx * 14.0, 1.0, -ddz * 14.0));
+        }`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        transformed.y += sin(position.x * 0.045 + uTime * 0.9) * 0.2
+                       + cos(position.z * 0.052 + uTime * 0.7) * 0.2
+                       + sin((position.x + position.z) * 0.021 + uTime * 0.45) * 0.28;`
+      );
   };
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = WATER_LEVEL;
@@ -471,14 +490,14 @@ function buildCastle(ctx) {
   pushGeo(glowGeos, box(0.9, 1.8, 0.3), 16, 34, -2 + 5.2);
   pushGeo(glowGeos, box(0.9, 1.8, 0.3), -16, 34, -2 + 5.2);
 
-  const stoneMat = toonMaterial(0x565064, { flatShading: true });
-  const roofMat = toonMaterial(0x39304f, { flatShading: true });
+  const stoneMat = toonMaterial(0x565064);
+  const roofMat = toonMaterial(0x39304f);
   const glowMat = glowMaterial(0x9a55ff, 1.7);
 
   const group = new THREE.Group();
-  const stone = new THREE.Mesh(mergeGeometries(stoneGeos), stoneMat);
+  const stone = new THREE.Mesh(facet(mergeGeometries(stoneGeos)), stoneMat);
   stone.castShadow = true; stone.receiveShadow = true;
-  const roof = new THREE.Mesh(mergeGeometries(roofGeos), roofMat);
+  const roof = new THREE.Mesh(facet(mergeGeometries(roofGeos)), roofMat);
   roof.castShadow = true;
   const glow = new THREE.Mesh(mergeGeometries(glowGeos), glowMat);
   // 門洞の闇
@@ -514,7 +533,7 @@ function buildCastle(ctx) {
 // ---------------- 遺跡(古代の柱・崩れたアーチ) ----------------
 function buildRuins(ctx) {
   const rand = mulberry32(0x9D1E5);
-  const stoneMat = toonMaterial(0x948b76, { flatShading: true });
+  const stoneMat = toonMaterial(0x948b76);
   const geos = [];
 
   const pillarAt = (x, z, scale, tilt, ry, broken) => {
@@ -558,7 +577,7 @@ function buildRuins(ctx) {
       0.8 + rand() * 0.4, (rand() - 0.5) * 0.2, rand() * Math.PI, rand() < 0.55);
   }
 
-  const mesh = new THREE.Mesh(mergeGeometries(geos), stoneMat);
+  const mesh = new THREE.Mesh(facet(mergeGeometries(geos)), stoneMat);
   mesh.castShadow = true; mesh.receiveShadow = true;
   ctx.scene.add(mesh);
   return mesh;
@@ -568,8 +587,8 @@ function buildRuins(ctx) {
 function buildMountains(ctx) {
   const rand = mulberry32(0x30A17);
   const N = 46;
-  const geo = new THREE.ConeGeometry(1, 1, 6, 1);
-  const mat = toonMaterial(0x5e6d78, { flatShading: true });
+  const geo = facet(new THREE.ConeGeometry(1, 1, 6, 1).toNonIndexed());
+  const mat = toonMaterial(0x5e6d78);
   const mesh = new THREE.InstancedMesh(geo, mat, N);
   const c = new THREE.Color();
   for (let i = 0; i < N; i++) {
@@ -673,8 +692,8 @@ function buildGrass(ctx) {
 
 // 木/岩/茂み等の共通ビルダー: 変換リスト → InstancedMesh
 function instancedFrom(ctx, geo, transforms, { shadow = true, tint = null } = {}) {
-  const mat = toonMaterial(0xffffff, { vertexColors: true, flatShading: true });
-  const mesh = new THREE.InstancedMesh(geo, mat, transforms.length);
+  const mat = toonMaterial(0xffffff, { vertexColors: true });
+  const mesh = new THREE.InstancedMesh(facet(geo), mat, transforms.length);
   mesh.frustumCulled = false;
   const c = new THREE.Color();
   for (let i = 0; i < transforms.length; i++) {

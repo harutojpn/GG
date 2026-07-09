@@ -558,8 +558,12 @@ body[data-uistate="boss"] #ui-root button { cursor: pointer; }
 .modal {
   width: min(480px, 92vw); max-height: 84vh; overflow: auto;
   padding: 30px 38px 36px;
+  background: rgba(8, 13, 17, 0.93);
   animation: modalIn 0.32s ease-out both;
 }
+/* モーダル表示中は背後の画面(タイトル/ポーズ等)を静かに沈める */
+#ui-root.modal-open .screen.visible { filter: brightness(0.42) blur(2px); }
+#ui-root.modal-open #dialog.visible { filter: brightness(0.42) blur(2px); }
 #modal-layer.wide .modal { width: min(600px, 94vw); }
 @keyframes modalIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 .modal-x {

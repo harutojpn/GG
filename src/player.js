@@ -98,20 +98,20 @@ function buildModel() {
   root = new THREE.Group();
   spinG = new THREE.Group(); spinG.position.y = 0.55; root.add(spinG);
   inner = new THREE.Group(); inner.position.y = -0.55; spinG.add(inner);
-  hips = new THREE.Group(); hips.position.y = 0.88; inner.add(hips);
+  hips = new THREE.Group(); hips.position.y = 0.92; inner.add(hips);
 
   // --- 脚(右=-X / 左=+X。モデルは+Z向き) ---
-  const thighGeo = new THREE.CylinderGeometry(0.078, 0.066, 0.38, 7);
-  const shinGeo = new THREE.CylinderGeometry(0.058, 0.082, 0.30, 7);
+  const thighGeo = new THREE.CylinderGeometry(0.078, 0.066, 0.40, 7);
+  const shinGeo = new THREE.CylinderGeometry(0.056, 0.080, 0.32, 7);
   const footGeo = new THREE.BoxGeometry(0.11, 0.09, 0.20);
-  const cuffGeo = new THREE.CylinderGeometry(0.088, 0.084, 0.09, 7);
+  const cuffGeo = new THREE.CylinderGeometry(0.086, 0.082, 0.09, 7);
   const mkLeg = (sx) => {
     const hip = new THREE.Group(); hip.position.set(sx * 0.105, -0.03, 0); hips.add(hip);
-    part(thighGeo, M.white, 0, -0.19, 0, hip);
-    const knee = new THREE.Group(); knee.position.set(0, -0.38, 0); hip.add(knee);
-    part(cuffGeo, M.boots, 0, -0.10, 0, knee);
-    part(shinGeo, M.boots, 0, -0.24, 0, knee);
-    const foot = part(footGeo, M.boots, 0, -0.385, 0.045, knee);
+    part(thighGeo, M.white, 0, -0.20, 0, hip);
+    const knee = new THREE.Group(); knee.position.set(0, -0.40, 0); hip.add(knee);
+    part(cuffGeo, M.boots, 0, -0.11, 0, knee);
+    part(shinGeo, M.boots, 0, -0.26, 0, knee);
+    const foot = part(footGeo, M.boots, 0, -0.415, 0.045, knee);
     return { hip, knee, foot };
   };
   const LR = mkLeg(-1), LL = mkLeg(1);
@@ -126,13 +126,13 @@ function buildModel() {
   part(new THREE.BoxGeometry(0.075, 0.06, 0.03), M.gold, 0, 0.205, 0.225, torso);     // バックル
   part(new THREE.CylinderGeometry(0.155, 0.215, 0.34, 7), M.tunic, 0, 0.385, 0, torso); // 胸
   part(new THREE.CylinderGeometry(0.105, 0.15, 0.10, 7), M.tunicDk, 0, 0.545, 0, torso); // 襟
-  // 背中の鞘・盾アンカー
+  // 背中の鞘・盾アンカー(柄が右肩上・切先が左腰)
   backSheath = new THREE.Group();
-  backSheath.position.set(-0.10, 0.30, -0.20);
-  backSheath.rotation.set(0.12, 0, 2.62);
+  backSheath.position.set(-0.15, 0.50, -0.185);
+  backSheath.rotation.set(0.10, 0, -2.60);
   torso.add(backSheath);
-  part(new THREE.BoxGeometry(0.085, 0.52, 0.045), M.leather, 0, 0.30, 0, backSheath);
-  part(new THREE.BoxGeometry(0.10, 0.06, 0.055), M.gold, 0, 0.52, 0, backSheath);
+  part(new THREE.BoxGeometry(0.095, 0.74, 0.05), M.leather, 0, 0.44, 0, backSheath);
+  part(new THREE.BoxGeometry(0.11, 0.06, 0.06), M.gold, 0, 0.62, 0, backSheath);
   backShieldG = new THREE.Group();
   backShieldG.position.set(0.02, 0.30, -0.27);
   backShieldG.rotation.set(0, Math.PI, 0.08);
@@ -155,7 +155,7 @@ function buildModel() {
   };
   const AR = mkArm(-1), AL = mkArm(1);
   shR = AR.sh; elbR = AR.elb; shL = AL.sh; elbL = AL.elb;
-  gripR = new THREE.Group(); gripR.position.set(0, -0.28, 0.01); gripR.rotation.x = 1.45; elbR.add(gripR);
+  gripR = new THREE.Group(); gripR.position.set(0, -0.28, 0.01); gripR.rotation.x = 2.35; elbR.add(gripR);
   shieldGrip = new THREE.Group(); shieldGrip.position.set(0.09, -0.15, 0); shieldGrip.rotation.set(0, Math.PI / 2, Math.PI / 2); elbL.add(shieldGrip);
 
   // --- 頭 ---
@@ -178,15 +178,15 @@ function buildModel() {
   const tuftL = part(new THREE.BoxGeometry(0.055, 0.12, 0.05), M.hair, 0.105, 0.155, 0.085, headG);
   tuftL.rotation.set(0.15, 0, -0.25);
   part(new THREE.BoxGeometry(0.05, 0.09, 0.04), M.hair, 0, 0.155, 0.125, headG).rotation.x = 0.35;
-  // とんがり頭巾(基部+揺れる2節)
-  const hood = part(new THREE.ConeGeometry(0.195, 0.30, 8), M.tunic, 0, 0.315, -0.02, headG);
-  hood.rotation.x = -0.22;
-  part(new THREE.CylinderGeometry(0.20, 0.19, 0.085, 8), M.tunicDk, 0, 0.21, -0.005, headG);
-  capMid = new THREE.Group(); capMid.position.set(0, 0.43, -0.075); headG.add(capMid);
-  part(new THREE.ConeGeometry(0.105, 0.24, 7), M.tunic, 0, 0.10, 0, capMid);
-  capTip = new THREE.Group(); capTip.position.set(0, 0.21, 0); capMid.add(capTip);
-  part(new THREE.ConeGeometry(0.052, 0.20, 6), M.tunic, 0, 0.085, 0, capTip);
-  part(new THREE.SphereGeometry(0.026, 6, 5), M.tunicDk, 0, 0.185, 0, capTip);
+  // とんがり頭巾(基部+後ろへ垂れる2節)
+  const hood = part(new THREE.ConeGeometry(0.20, 0.26, 8), M.tunic, 0, 0.295, -0.025, headG);
+  hood.rotation.x = -0.30;
+  part(new THREE.CylinderGeometry(0.20, 0.19, 0.085, 8), M.tunicDk, 0, 0.20, -0.005, headG);
+  capMid = new THREE.Group(); capMid.position.set(0, 0.385, -0.09); headG.add(capMid);
+  part(new THREE.ConeGeometry(0.098, 0.26, 7), M.tunic, 0, 0.11, 0, capMid);
+  capTip = new THREE.Group(); capTip.position.set(0, 0.225, 0); capMid.add(capTip);
+  part(new THREE.ConeGeometry(0.047, 0.22, 6), M.tunic, 0, 0.09, 0, capTip);
+  part(new THREE.SphereGeometry(0.028, 6, 5), M.tunicDk, 0, 0.205, 0, capTip);
 
   // --- 剣(グリップ原点、+Yが刃先) ---
   sword = new THREE.Group();
@@ -207,6 +207,7 @@ function buildModel() {
   emb.rotation.x = Math.PI / 2; emb.rotation.z = 0;
   part(new THREE.SphereGeometry(0.045, 7, 6), M.gold, 0, 0.10, 0.035, shield).scale.set(1, 1, 0.55);
 
+  root.userData.rig = { hips, torso, headG, shR, shL, legR, legL, kneeR, kneeL, capMid, inner };
   setArmed(false, true);
   return root;
 }
@@ -249,7 +250,8 @@ export async function init(ctx) {
   _ctx = ctx;
   buildModel();
   vel = new THREE.Vector3();
-  root.position.copy(ctx.world.startPos);
+  if (ctx.world && ctx.world.startPos) root.position.copy(ctx.world.startPos);
+  else root.position.set(0, 0, 250);
   root.position.y = ctx.getGroundHeight(root.position.x, root.position.z);
   root.rotation.y = facing;
   ctx.scene.add(root);
@@ -510,8 +512,9 @@ export function update(ctx, dt) {
     const dx = pos.x - c.x, dz = pos.z - c.z;
     const rr = c.radius + PLAYER_R;
     const d2 = dx * dx + dz * dz;
-    if (d2 >= rr * rr || d2 < 1e-8) continue;
+    if (d2 >= rr * rr) continue;
     if (c.height !== undefined && pos.y > ctx.getGroundHeight(c.x, c.z) + c.height) continue;
+    if (d2 < 1e-8) { pos.x -= Math.sin(facing) * rr; pos.z -= Math.cos(facing) * rr; continue; }
     const d = Math.sqrt(d2), push = (rr - d) / d;
     pos.x += dx * push; pos.z += dz * push;
   }
@@ -579,9 +582,9 @@ export function update(ctx, dt) {
   root.rotation.y = facing + spinExtra;
 
   // ---- 頭巾の揺れ(二次アニメ) ----
-  const capSway = Math.sin(elapsed * 2.2) * 0.05 + Math.sin(runPhase * 2) * 0.10 * moveAmt;
-  capMid.rotation.x = damp(capMid.rotation.x, -0.5 - moveAmt * 0.38 - clamp(vel.y * 0.022, -0.3, 0.3) + capSway, 8, dt);
-  capTip.rotation.x = damp(capTip.rotation.x, -0.42 - moveAmt * 0.30 + Math.sin(elapsed * 2.2 + 0.9) * 0.07 + Math.sin(runPhase * 2 + 1.2) * 0.13 * moveAmt, 7, dt);
+  const capSway = Math.sin(elapsed * 2.2) * 0.06 + Math.sin(runPhase * 2) * 0.12 * moveAmt;
+  capMid.rotation.x = damp(capMid.rotation.x, -0.80 - moveAmt * 0.35 - clamp(vel.y * 0.022, -0.3, 0.3) + capSway, 8, dt);
+  capTip.rotation.x = damp(capTip.rotation.x, -0.62 - moveAmt * 0.28 + Math.sin(elapsed * 2.2 + 0.9) * 0.08 + Math.sin(runPhase * 2 + 1.2) * 0.15 * moveAmt, 7, dt);
   capMid.rotation.z = damp(capMid.rotation.z, Math.sin(elapsed * 1.7) * 0.05, 6, dt);
 
   // ---- まばたき ----
@@ -634,20 +637,20 @@ function poseMove(sN, dashing, locked) {
   idleT = 0; lookT = 0;
   const ph = runPhase;
   const w = clamp(sN, 0, 1);
-  const legAmp = 0.28 + 0.36 * w + (dashing ? 0.11 : 0);
-  const armAmp = 0.30 + 0.40 * w + (dashing ? 0.15 : 0);
+  const legAmp = 0.34 + 0.44 * w + (dashing ? 0.13 : 0);
+  const armAmp = 0.36 + 0.48 * w + (dashing ? 0.17 : 0);
   const sR = Math.sin(ph), sL = -sR;
   const cR = Math.cos(ph);
   PT.legR_ = -sR * legAmp; PT.legL_ = -sL * legAmp;
-  PT.kneeR_ = Math.max(0, cR) * (0.5 + 0.6 * w);
-  PT.kneeL_ = Math.max(0, -cR) * (0.5 + 0.6 * w);
+  PT.kneeR_ = Math.max(0, cR) * (0.6 + 0.7 * w);
+  PT.kneeL_ = Math.max(0, -cR) * (0.6 + 0.7 * w);
   PT.shRX_R = sR * armAmp; PT.shRX_L = sL * armAmp;
-  PT.elbR_ = 0.35 + Math.max(0, -sR) * 0.55 + (armed ? 0.12 : 0);
-  PT.elbL_ = 0.35 + Math.max(0, -sL) * 0.55;
+  PT.elbR_ = 0.4 + Math.max(0, -sR) * 0.65 + (armed ? 0.12 : 0);
+  PT.elbL_ = 0.4 + Math.max(0, -sL) * 0.65;
   PT.shRZ_R = -0.12; PT.shRZ_L = 0.12;
-  PT.torsoRX = 0.05 + w * 0.10 + (dashing ? 0.18 : 0); // 前傾(ダッシュで強く)
-  PT.torsoRY = sR * 0.07;
-  PT.hipsY = (-0.05 + Math.abs(cR) * 0.05) * w;
+  PT.torsoRX = 0.06 + w * 0.12 + (dashing ? 0.22 : 0); // 前傾(ダッシュで強く)
+  PT.torsoRY = sR * 0.09;
+  PT.hipsY = (-0.055 + Math.abs(cR) * 0.055) * w;
   PT.headRX = -PT.torsoRX * 0.55;
   if (locked) { // ストレイフ: 脚は移動方向へ・上体は対象へ
     const la = angleDelta(facing, Math.atan2(_mv.x, _mv.z));
@@ -678,9 +681,9 @@ function poseLandOverlay() {
 }
 
 function poseBlockOverlay() {
-  PT.shRX_L = -1.05; PT.shRZ_L = -0.18; PT.elbL_ = 1.3;
+  PT.shRX_L = -1.18; PT.shRZ_L = -0.55; PT.elbL_ = 1.4;
   PT.shRX_R = 0.35; PT.shRZ_R = -0.4; PT.elbR_ = 0.8;
-  PT.torsoRX += 0.10; PT.torsoRY = 0.22;
+  PT.torsoRX += 0.10; PT.torsoRY = 0.18;
   PT.hipsY -= 0.06;
   PT.legR_ -= 0.16; PT.legL_ += 0.13;
   PT.kneeR_ += 0.28; PT.kneeL_ += 0.16;
@@ -783,7 +786,7 @@ function poseDead(t) {
 // ---------------- ポーズ適用(dampブレンド) ----------------
 function applyPose(dt, rate) {
   const D = (o, p, v) => { o[p] = damp(o[p], v, rate, dt); };
-  D(hips.position, 'y', 0.88 + PT.hipsY);
+  D(hips.position, 'y', 0.92 + PT.hipsY);
   D(hips.rotation, 'y', PT.hipsRY);
   D(torso.rotation, 'x', PT.torsoRX);
   D(torso.rotation, 'y', PT.torsoRY - PT.hipsRY);

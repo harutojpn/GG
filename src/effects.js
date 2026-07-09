@@ -816,6 +816,14 @@ function buildComposer() {
 function fitComposer() {
   if (!CTX) return;
   if (composer) {
+    // MSAA サンプル数を品質に合わせる(変更時は dispose で再確保)
+    const smp = CTX.settings.quality === 'high' ? 4 : 2;
+    if (composer.renderTarget1.samples !== smp) {
+      composer.renderTarget1.samples = smp;
+      composer.renderTarget2.samples = smp;
+      composer.renderTarget1.dispose();
+      composer.renderTarget2.dispose();
+    }
     composer.setPixelRatio(CTX.quality.pixelRatio || 1);
     composer.setSize(innerWidth, innerHeight);
   }
