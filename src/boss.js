@@ -69,7 +69,7 @@ void main(){
   col += mag * rim * 1.7;
   float alpha = core * (0.62 + 0.32 * swirl) + rim * 0.95;
   float n = sin(p.x * 23.0 + p.y * 31.0 + uTime * 3.0) * 0.5 + 0.5;
-  alpha *= 1.0 - smoothstep(uBreak * 1.3 - 0.25, uBreak * 1.3, n * 0.72 + r * 0.28);
+  alpha *= 1.0 - smoothstep(0.0, 0.25, uBreak * 1.35 - (n * 0.72 + r * 0.28));
   gl_FragColor = vec4(col * (1.0 + uBreak * 2.2), alpha);
 }
 `;
@@ -311,7 +311,7 @@ export async function init(ctx) {
     hp: 60, maxHp: 60,
     // デバッグ用フック(契約外・統合コードは使用しないこと)
     _forceAttack(name) { forceAttack(name); },
-    _dbg() { return { seq, seqT: +seqT.toFixed(2), battle, phase, aiState: ai.state, nearGate, promptOn }; },
+    _dbg() { return { seq, seqT: +seqT.toFixed(2), battle, phase, aiState: ai.state, aiT: +ai.t.toFixed(2), nearGate, promptOn }; },
   };
 
   // リトライ: ボス戦(または開戦演出)中に gameover / title へ落ちたら撤去して結界復活

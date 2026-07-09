@@ -387,23 +387,23 @@ let lavaMat = null, lavaTex = null, lavaLight = null;
 
 function buildLava(ctx) {
   lavaTex = canvasTexture(256, (g, s) => {
-    g.fillStyle = '#ff5a1f';
+    g.fillStyle = '#ff6a24';
     g.fillRect(0, 0, s, s);
     const rand = mulberry32(0xF1AE);
-    // 暗い岩塊
-    for (let i = 0; i < 46; i++) {
-      const x = rand() * s, y = rand() * s, r = 8 + rand() * 26;
-      g.fillStyle = `rgba(${60 + (rand() * 40) | 0}, ${20 + (rand() * 14) | 0}, 10, ${0.55 + rand() * 0.3})`;
-      g.beginPath(); g.ellipse(x, y, r, r * (0.5 + rand() * 0.5), rand() * Math.PI, 0, Math.PI * 2); g.fill();
+    // 冷えた岩皮(暗い焦げ茶・小さめを多数)
+    for (let i = 0; i < 90; i++) {
+      const x = rand() * s, y = rand() * s, r = 5 + rand() * 16;
+      g.fillStyle = `rgba(${52 + (rand() * 26) | 0}, ${22 + (rand() * 12) | 0}, 10, ${0.5 + rand() * 0.35})`;
+      g.beginPath(); g.ellipse(x, y, r, r * (0.45 + rand() * 0.5), rand() * Math.PI, 0, Math.PI * 2); g.fill();
     }
     // 明るい亀裂
-    g.strokeStyle = 'rgba(255, 214, 130, 0.9)';
-    for (let i = 0; i < 22; i++) {
-      g.lineWidth = 1.5 + rand() * 2.5;
+    g.strokeStyle = 'rgba(255, 226, 150, 0.85)';
+    for (let i = 0; i < 26; i++) {
+      g.lineWidth = 1 + rand() * 1.8;
       g.beginPath();
       let x = rand() * s, y = rand() * s;
       g.moveTo(x, y);
-      for (let k = 0; k < 4; k++) { x += (rand() - 0.5) * 60; y += (rand() - 0.5) * 60; g.lineTo(x, y); }
+      for (let k = 0; k < 5; k++) { x += (rand() - 0.5) * 52; y += (rand() - 0.5) * 52; g.lineTo(x, y); }
       g.stroke();
     }
   });

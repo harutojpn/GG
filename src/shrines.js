@@ -574,7 +574,7 @@ function buildRoom0(ctx, room) {
   block.position.set(g0x(p.cellX), 0.6, g0z(p.cellZ));
   g.add(block);
   p.block = block;
-  p.blockCol = { x: room.origin.x + block.position.x, z: room.origin.z + block.position.z, radius: 0.92, height: 1.4 };
+  p.blockCol = { x: room.origin.x + block.position.x, z: room.origin.z + block.position.z, radius: 0.8, height: 1.4 };
   room.colliders.push(p.blockCol);
 
   room.ground = () => 0;
