@@ -177,11 +177,11 @@ export function toonifyGLTF(root, tint = 0xffffff, opts = {}) {
   root.traverse((o) => {
     if (!o.isMesh) return;
     const src = o.material;
+    // three r170 では skinning はマテリアルのパラメータではなく isSkinnedMesh から自動判定される。
     const mat = new THREE.MeshToonMaterial({
       map: src.map || null,
       color: tint,
       gradientMap: toonGradientMap(),
-      skinning: !!o.isSkinnedMesh,
       transparent: src.transparent,
       alphaTest: src.alphaTest,
       ...opts,
