@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   Simplex2, mulberry32, clamp, lerp, smoothstep,
   toonMaterial, glowMaterial, canvasTexture,
-  loadGLTF, toonifyGLTF, measureObject,
+  loadGLTF, measureObject,
 } from './util.js';
 
 // ---------------- 定数(ワールドマップ契約座標) ----------------
@@ -252,13 +252,12 @@ function loadCastleAssets() {
   ]);
 }
 
-// GLTFシーンの全メッシュのワールド変換を焼き込み、material.color を頂点カラーとして
+// GLTFシーンの全メッシュのワールド変換を焼き込み、色を頂点カラーとして
 // 単一の非インデックスジオメトリにマージする(既存 pushGeo/colorize と同じ流儀)。
-// tint を渡すと toonifyGLTF で一旦その色に染めてから焼き込む(城のようにテクスチャが無い/使えない場合用)。
 // tint が null なら各メッシュの元の material.color(Kenneyの単色マテリアル)をそのまま焼き込む(木・岩用)。
+// tint に色を渡すと全メッシュをその色で塗る(colormapテクスチャ前提で色情報を持たない城パーツの石色付け用)。
 function bakeGeometry(gltf, tint = null) {
-  const root = gltf.scene.clone(true);
-  if (tint != null) toonifyGLTF(root, tint);
+  const root = gltf.scene;
   root.updateMatrixWorld(true);
   const parts = [];
   root.traverse((o) => {
@@ -267,8 +266,8 @@ function bakeGeometry(gltf, tint = null) {
     const g = src.index ? src.toNonIndexed() : src.clone();
     g.applyMatrix4(o.matrixWorld);
     const posOnly = new THREE.BufferGeometry();
-    posOnly.setAttribute('position', g.attributes.position);
-    colorize(posOnly, o.material.color.getHex());
+    posOnly.setAttribute('position', g.attributes.position.clone());
+    colorize(posOnly, tint != null ? tint : o.material.color.getHex());
     parts.push(posOnly);
     g.dispose();
   });
