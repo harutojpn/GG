@@ -2,9 +2,10 @@
 // 契約: ARCHITECTURE.md — ctx.combat = { enemies, nearestTargetable, registerEnemy, damageEnemy }
 // 敵3種(全てプロシージャル): ゴブリン(野営地) / ボーンソルジャー(夜の平原) / 魔導ウィスプ(遺跡・火山)
 import * as THREE from 'three';
+import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import {
   toonMaterial, glowMaterial, clamp, lerp, smoothstep, damp, dampAngle,
-  canvasTexture, part, mulberry32, TMP,
+  canvasTexture, part, mulberry32, TMP, loadGLTF, toonifyGLTF, measureObject,
 } from './util.js';
 
 const rand = mulberry32(0xBA7712);
@@ -40,6 +41,8 @@ let skelSpawnT = 0;
 let campTick = 0;
 let G = null;            // 共有ジオメトリ
 let M = null;            // 共有マテリアル
+let orcAsset = null;     // { scene, clipMap, scale } — ゴブリン用リグ付きモデル(Kenney character-orc.glb)
+const GOB_MODEL_YAW = Math.PI; // モデルのローカル前方とyaw規約(+Zが前)を合わせるオフセット
 
 const _v1 = new THREE.Vector3();
 
@@ -75,7 +78,6 @@ function buildShared() {
     cone4: new THREE.ConeGeometry(1, 1, 4),
     limb: new THREE.CylinderGeometry(1, 0.82, 2, 7),
     box: new THREE.BoxGeometry(1, 1, 1),
-    skirt: new THREE.CylinderGeometry(0.26, 0.37, 0.26, 9, 1, true),
     rib: new THREE.TorusGeometry(0.17, 0.028, 5, 10),
     rock: new THREE.DodecahedronGeometry(1, 0),
     gem: new THREE.OctahedronGeometry(0.16, 0),
@@ -100,9 +102,6 @@ function buildShared() {
   G.heart.scale(0.035, 0.035, 0.035);
 
   M = {
-    gobSkin: toonMaterial(0x9d5233),
-    gobDark: toonMaterial(0x7c3f28),
-    cloth: toonMaterial(0xb59a54, { side: THREE.DoubleSide }),
     wood: toonMaterial(0x775230),
     eyeY: glowMaterial(0xffd23e, 1.6),
     bone: toonMaterial(0xe8e2d0),
@@ -121,6 +120,7 @@ function buildShared() {
     fireball: glowMaterial(0xd06bff, 2.4),
     fireHalo: glowMaterial(0xb26bff, 1.2, { transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending }),
     flash: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    flashSkin: new THREE.MeshBasicMaterial({ color: 0xffffff, skinning: true }),
   };
 }
 
@@ -131,60 +131,54 @@ function collectFlash(root) {
   return list;
 }
 
-// ================= 敵モデル(プロシージャル) =================
-function buildGoblin() {
+// ================= 敵モデル =================
+// ゴブリン: Kenney character-orc.glb(骨格アニメーション付き)を複製して使用。
+// テクスチャは同梱されていない("Textures/colormap.png"参照が別ファイルで存在しない)ため、
+// toonifyGLTFでトゥーン調のsolid tintを与える(このゲームの他の敵と統一感のある見た目になる)。
+const GOB_TINT = 0xc8e0c0;
+function buildGoblinModel() {
   const root = new THREE.Group();
-  const body = new THREE.Group();
-  body.position.y = 0.5;
-  root.add(body);
+  const clone = skeletonClone(orcAsset.scene);
+  clone.scale.setScalar(orcAsset.scale);
+  clone.rotation.y = GOB_MODEL_YAW;
+  root.add(clone);
 
-  const torso = part(G.sphere, M.gobSkin, 0, 0.16, 0, body);
-  torso.scale.set(0.30, 0.35, 0.27);
-  const belly = part(G.sphere, M.gobDark, 0, 0.10, 0.10, body);
-  belly.scale.set(0.20, 0.22, 0.17);
-  const cloth = part(G.skirt, M.cloth, 0, -0.02, 0, body);
+  const mixer = new THREE.AnimationMixer(clone);
+  const actions = {};
+  for (const name of ['idle', 'walk', 'sprint', 'attack-melee-right', 'die']) {
+    const clip = orcAsset.clipMap.get(name);
+    if (!clip) continue;
+    const act = mixer.clipAction(clip);
+    if (name === 'attack-melee-right' || name === 'die') {
+      act.setLoop(THREE.LoopOnce, 1);
+      act.clampWhenFinished = true;
+    }
+    actions[name] = act;
+  }
 
-  const head = new THREE.Group();
-  head.position.set(0, 0.52, 0.02);
-  body.add(head);
-  const skull = part(G.sphere, M.gobSkin, 0, 0, 0, head);
-  skull.scale.set(0.26, 0.24, 0.25);
-  const earL = part(G.cone4, M.gobSkin, -0.26, 0.08, -0.02, head);
-  earL.scale.set(0.09, 0.34, 0.045);
-  earL.rotation.z = 1.25; earL.rotation.y = -0.25;
-  const earR = part(G.cone4, M.gobSkin, 0.26, 0.08, -0.02, head);
-  earR.scale.set(0.09, 0.34, 0.045);
-  earR.rotation.z = -1.25; earR.rotation.y = 0.25;
-  const nose = part(G.cone, M.gobDark, 0, -0.03, 0.27, head);
-  nose.scale.set(0.05, 0.16, 0.05);
-  nose.rotation.x = Math.PI / 2;
-  const eyeL = part(G.sphere, M.eyeY, -0.10, 0.04, 0.21, head);
-  eyeL.scale.setScalar(0.045);
-  const eyeR = part(G.sphere, M.eyeY, 0.10, 0.04, 0.21, head);
-  eyeR.scale.setScalar(0.045);
+  return { root, p: { mixer, actions, current: null }, flash: collectFlash(root) };
+}
 
-  const armL = new THREE.Group(); armL.position.set(-0.31, 0.34, 0); body.add(armL);
-  const armLm = part(G.limb, M.gobSkin, 0, -0.16, 0, armL); armLm.scale.set(0.065, 0.18, 0.065);
-  part(G.sphere, M.gobDark, 0, -0.36, 0, armL).scale.setScalar(0.08);
+// クロスフェードでクリップを切り替える(同じクリップが再生中なら何もしない)
+function playGobClip(e, name, opts = {}) {
+  const P = e.p;
+  const act = P.actions[name];
+  if (!act) return null;
+  if (P.current === act) return act;
+  const fade = opts.fade ?? 0.15;
+  act.reset();
+  if (fade > 0) act.fadeIn(fade);
+  act.play();
+  if (P.current) P.current.fadeOut(fade);
+  P.current = act;
+  return act;
+}
 
-  const armR = new THREE.Group(); armR.position.set(0.31, 0.34, 0); body.add(armR);
-  const armRm = part(G.limb, M.gobSkin, 0, -0.16, 0, armR); armRm.scale.set(0.065, 0.18, 0.065);
-  part(G.sphere, M.gobDark, 0, -0.36, 0, armR).scale.setScalar(0.08);
-  const club = new THREE.Group(); club.position.set(0, -0.36, 0.02); armR.add(club);
-  const shaft = part(G.limb, M.wood, 0, 0, 0.22, club);
-  shaft.scale.set(0.035, 0.24, 0.035);
-  shaft.rotation.x = Math.PI / 2;
-  const clubHead = part(G.sphere, M.wood, 0, 0, 0.46, club);
-  clubHead.scale.set(0.09, 0.09, 0.13);
-
-  const legL = new THREE.Group(); legL.position.set(-0.12, 0.34, 0); root.add(legL);
-  const legLm = part(G.limb, M.gobSkin, 0, -0.12, 0, legL); legLm.scale.set(0.07, 0.14, 0.07);
-  part(G.sphere, M.gobDark, 0, -0.28, 0.04, legL).scale.set(0.085, 0.055, 0.115);
-  const legR = new THREE.Group(); legR.position.set(0.12, 0.34, 0); root.add(legR);
-  const legRm = part(G.limb, M.gobSkin, 0, -0.12, 0, legR); legRm.scale.set(0.07, 0.14, 0.07);
-  part(G.sphere, M.gobDark, 0, -0.28, 0.04, legR).scale.set(0.085, 0.055, 0.115);
-
-  return { root, p: { body, head, earL, earR, armL, armR, legL, legR, club }, flash: collectFlash(root) };
+// 移動速度に応じて idle/walk/sprint を自動選択
+function goblinMoveAnim(e, speed) {
+  if (speed >= 3.0) playGobClip(e, 'sprint');
+  else if (speed > 0.05) playGobClip(e, 'walk');
+  else playGobClip(e, 'idle');
 }
 
 function buildSkeleton() {
@@ -321,7 +315,7 @@ function baseEnemy(build, def, name, type) {
 }
 
 function spawnGoblin(ctx, x, z, camp) {
-  const e = baseEnemy(buildGoblin(), GOB, 'ゴブリン', 'goblin');
+  const e = baseEnemy(buildGoblinModel(), GOB, 'ゴブリン', 'goblin');
   e.pos.set(x, ctx.getGroundHeight(x, z), z);
   e.home.copy(e.pos);
   e.camp = camp;
@@ -329,6 +323,7 @@ function spawnGoblin(ctx, x, z, camp) {
   camp.members.push(e);
   enemies.push(e);
   combatGroup.add(e.root);
+  playGobClip(e, 'idle', { fade: 0 }); // 初期姿勢(bindポーズのままにしない)
   return e;
 }
 
@@ -374,7 +369,8 @@ function spawnWisp(ctx, spot) {
 // ================= 被弾・撃破 =================
 function startFlash(e) {
   if (e.flashT <= 0) {
-    for (const f of e.flash) f.m.material = M.flash;
+    // SkinnedMesh(ゴブリン)はskinning対応の白マテリアルに差し替える
+    for (const f of e.flash) f.m.material = f.m.isSkinnedMesh ? M.flashSkin : M.flash;
   }
   e.flashT = 0.08;
 }
@@ -440,6 +436,7 @@ function damageEnemyImpl(e, dmg, fromPos) {
     e.alive = false;
     e.state = 'dying';
     e.t = 0;
+    if (e.type === 'goblin') playGobClip(e, 'die', { fade: 0.1 });
     ctx.emit('enemy-killed', { enemy: e, pos: e.pos.clone() });
   } else if (e.state !== 'rise' && e.state !== 'dying' && e.state !== 'crumble') {
     if (e.type !== 'wisp') { e.state = 'stunned'; e.t = 0; }
@@ -838,25 +835,7 @@ function resolveColliders(ctx, e, dt) {
 }
 
 // ================= アニメーション =================
-function walkAnim(e, dt, run01) {
-  const p = e.p;
-  e.animT += dt * (5 + run01 * 6.5);
-  const s = Math.sin(e.animT);
-  const amp = 0.45 + run01 * 0.5;
-  p.legL.rotation.x = s * amp;
-  p.legR.rotation.x = -s * amp;
-  p.armL.rotation.x = damp(p.armL.rotation.x, -s * amp * 0.7, 14, dt);
-  p.armR.rotation.x = damp(p.armR.rotation.x, s * amp * 0.45, 14, dt);
-  p.body.position.y = 0.5 + Math.abs(Math.cos(e.animT)) * 0.05 * (0.4 + run01);
-  p.body.rotation.x = damp(p.body.rotation.x, 0.05 + run01 * 0.22, 8, dt);
-  p.body.position.x = 0;
-  if (p.earL) {
-    p.earL.rotation.z = 1.25 + Math.sin(e.animT * 0.7) * 0.07;
-    p.earR.rotation.z = -1.25 - Math.cos(e.animT * 0.7) * 0.07;
-    p.head.rotation.y = damp(p.head.rotation.y, 0, 8, dt);
-  }
-}
-
+// (ボーンソルジャー用の姿勢アニメーション。ゴブリンはKenneyモデルのAnimationMixerクリップで駆動する)
 function idleAnim(e, dt) {
   const p = e.p;
   e.animT += dt * 2;
@@ -900,6 +879,12 @@ function dyingUpdate(ctx, e, dt) {
     }
     return;
   }
+  if (e.type === 'goblin') {
+    // dieクリップ(0.33秒)自体が「ふらつき→倒れる」の演技を持っているので、
+    // 再生し切ったタイミングで消滅演出(burst('death')含むfinalizeDeath)を発火するだけでよい。
+    if (e.t >= 0.33) finalizeDeath(ctx, e, true, true);
+    return;
+  }
   if (e.t < 0.16 && p.body) {
     p.body.rotation.z = Math.sin(e.t * 46) * 0.12; // ふらつき
   } else if (p.body) {
@@ -912,8 +897,12 @@ function dyingUpdate(ctx, e, dt) {
 }
 
 // ================= ゴブリンAI =================
+// 攻撃クリップ(attack-melee-right)の長さ。旧「0.6秒予備動作→0.3秒振り下ろし」を
+// このクリップ1本の再生にマッピングし、ダメージ判定はクリップ後半(振り下ろし付近)に置く。
+const GOB_ATK_DUR = 0.42;
+const GOB_ATK_HIT_T = GOB_ATK_DUR * 0.72;
+
 function goblinUpdate(ctx, e, dt, distP) {
-  const p = e.p;
   const pp = ctx.player.position;
   const playerOk = ctx.player.hp > 0;
   e.t += dt;
@@ -925,15 +914,16 @@ function goblinUpdate(ctx, e, dt, distP) {
         showAlert(e);
         sfx('alert');
         faceTo(e, pp.x, pp.z);
+        playGobClip(e, 'idle');
         break;
       }
       const dh = Math.hypot(e.home.x - e.pos.x, e.home.z - e.pos.z);
       if (dh > 20) { // 追跡で離れすぎたら駆け足で野営地へ
         moveToward(ctx, e, e.home.x, e.home.z, GOB.run * 0.8, dt);
-        walkAnim(e, dt, 0.7);
+        goblinMoveAnim(e, GOB.run * 0.8);
         break;
       }
-      if (e.restT > 0) { e.restT -= dt; idleAnim(e, dt); break; }
+      if (e.restT > 0) { e.restT -= dt; playGobClip(e, 'idle'); break; }
       if (!e.hasTarget || e.t > 9) pickWander(ctx, e);
       if (e.hasTarget) {
         moveToward(ctx, e, e.tx, e.tz, GOB.walk, dt);
@@ -941,66 +931,52 @@ function goblinUpdate(ctx, e, dt, distP) {
           e.hasTarget = false;
           e.restT = 1 + rand() * 2.5;
         }
-        walkAnim(e, dt, 0.15);
+        goblinMoveAnim(e, GOB.walk);
+      } else {
+        playGobClip(e, 'idle');
       }
       break;
     }
-    case 'alert': {
+    case 'alert': { // 気づいて一瞬立ち止まる(0.5s)
       faceTo(e, pp.x, pp.z);
-      p.body.rotation.x = damp(p.body.rotation.x, -0.14, 12, dt); // のけぞって驚く
-      p.body.position.y = 0.5 + Math.sin(e.t * 30) * 0.02;
+      playGobClip(e, 'idle');
       if (e.t >= 0.5) { e.state = 'chase'; e.t = 0; }
       break;
     }
     case 'chase': {
       if (!playerOk || distP > 30) { e.state = 'patrol'; e.t = 0; e.hasTarget = false; break; }
       faceTo(e, pp.x, pp.z);
-      if (distP <= GOB.range) { e.state = 'windup'; e.t = 0; break; }
+      if (distP <= GOB.range) {
+        e.state = 'attack'; e.t = 0; e.hitDone = false;
+        playGobClip(e, 'attack-melee-right', { fade: 0.12 });
+        break;
+      }
       moveToward(ctx, e, pp.x, pp.z, GOB.run, dt);
-      walkAnim(e, dt, 1);
+      goblinMoveAnim(e, GOB.run);
       break;
     }
-    case 'windup': { // 棍棒を高く掲げて震える(0.6s)
+    case 'attack': { // attack-melee-right クリップを1回再生(予備動作+振り下ろし込み)
       faceTo(e, pp.x, pp.z);
-      const k = Math.min(1, e.t / 0.6);
-      p.armR.rotation.x = damp(p.armR.rotation.x, -2.6, 16, dt);
-      p.armL.rotation.x = damp(p.armL.rotation.x, -0.5, 10, dt);
-      p.body.rotation.x = damp(p.body.rotation.x, -0.12, 10, dt);
-      p.body.position.x = Math.sin(ctx.time.elapsed * 55) * 0.022 * k;
-      p.legL.rotation.x = damp(p.legL.rotation.x, 0.25, 10, dt);
-      p.legR.rotation.x = damp(p.legR.rotation.x, -0.25, 10, dt);
-      if (e.t >= 0.6) { e.state = 'swing'; e.t = 0; e.hitDone = false; }
-      break;
-    }
-    case 'swing': { // 振り下ろし
-      const k = Math.min(1, e.t / 0.16);
-      p.armR.rotation.x = lerp(-2.6, 1.05, k * (2 - k));
-      p.body.rotation.x = lerp(-0.12, 0.42, k);
-      p.body.position.x = 0;
-      if (!e.hitDone && e.t >= 0.1) {
+      if (!e.hitDone && e.t >= GOB_ATK_HIT_T) {
         e.hitDone = true;
         if (playerOk && distP < GOB.reach) {
           try { ctx.player.damage(GOB.dmg, e.pos); } catch (err) { /* noop */ }
         }
       }
-      if (e.t >= 0.3) { e.state = 'recover'; e.t = 0; }
+      if (e.t >= GOB_ATK_DUR) { e.state = 'recover'; e.t = 0; playGobClip(e, 'idle'); }
       break;
     }
     case 'recover': { // 1秒様子見
-      p.armR.rotation.x = damp(p.armR.rotation.x, 0, 6, dt);
-      p.armL.rotation.x = damp(p.armL.rotation.x, 0, 6, dt);
-      p.body.rotation.x = damp(p.body.rotation.x, 0.05, 6, dt);
-      p.body.position.y = 0.5 + Math.sin(e.t * 5) * 0.02;
       faceTo(e, pp.x, pp.z);
       if (e.t >= 1) {
         e.t = 0;
-        e.state = !playerOk ? 'patrol' : distP <= GOB.range + 0.3 ? 'windup' : distP < 30 ? 'chase' : 'patrol';
+        e.state = !playerOk ? 'patrol' : distP <= GOB.range + 0.3 ? 'attack' : distP < 30 ? 'chase' : 'patrol';
+        if (e.state === 'attack') { e.hitDone = false; playGobClip(e, 'attack-melee-right', { fade: 0.12 }); }
       }
       break;
     }
-    case 'stunned': { // のけぞり
-      p.body.rotation.x = damp(p.body.rotation.x, -0.5, 14, dt);
-      p.armR.rotation.x = damp(p.armR.rotation.x, -0.6, 10, dt);
+    case 'stunned': { // のけぞり(専用クリップが無いため、ノックバック+idleで表現)
+      playGobClip(e, 'idle', { fade: 0.08 });
       if (e.t >= 0.3) { e.state = 'chase'; e.t = 0; }
       break;
     }
@@ -1325,6 +1301,13 @@ export async function init(ctx) {
   buildTrail();
   buildFireballs();
 
+  // --- ゴブリン用リグ付きモデル(一度だけロード。以降はSkeletonUtils.cloneで複製) ---
+  const orcGltf = await loadGLTF('assets/kenney/characters/character-orc.glb');
+  toonifyGLTF(orcGltf.scene, GOB_TINT); // 同梱テクスチャが無いためtoon調のsolid tintで統一
+  const { size: orcSize } = measureObject(orcGltf.scene);
+  const clipMap = new Map(orcGltf.animations.map((c) => [c.name, c]));
+  orcAsset = { scene: orcGltf.scene, clipMap, scale: GOB.height / (orcSize.y || 1) };
+
   // --- ゴブリン野営地: 草原x3・森x2・湖畔x1・火山麓x1 ---
   const campDefs = [
     [70, 150], [-130, 90], [150, -40],   // 草原
@@ -1408,6 +1391,11 @@ export function update(ctx, dt) {
     if (e._gone) enemies.splice(i, 1);
   }
   separation(ctx);
+
+  // ゴブリンは各自のAnimationMixerを個別に進める(骨格アニメーション駆動)
+  for (const e of enemies) {
+    if (e.type === 'goblin' && e.p && e.p.mixer) e.p.mixer.update(dt);
+  }
 
   applyPlayerAttack(ctx);
   updateFireballs(ctx, dt);

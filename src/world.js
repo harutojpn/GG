@@ -5,6 +5,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   Simplex2, mulberry32, clamp, lerp, smoothstep,
   toonMaterial, glowMaterial, canvasTexture,
+  loadGLTF, toonifyGLTF, measureObject,
 } from './util.js';
 
 // ---------------- 定数(ワールドマップ契約座標) ----------------
@@ -224,6 +225,76 @@ function composeAt(mesh, i, x, y, z, ry, sx, sy, sz) {
   mesh.setMatrixAt(i, _m4);
 }
 
+// ---------------- Kenney GLBアセット(木・岩・城)の読み込みと単一ジオメトリ化 ----------------
+// util.loadGLTF/toonifyGLTF/measureObject を使い、GLTFシーンを「変換焼き込み済み・頂点カラー付きの
+// 単一 BufferGeometry」に潰す。以降は既存の InstancedMesh 配置ロジック(composeAt 等)にそのまま乗る。
+const NATURE_DIR = 'assets/kenney/nature/';
+const CASTLE_DIR = 'assets/kenney/castle/';
+
+async function loadAssetSet(dir, names) {
+  const entries = await Promise.all(names.map((n) => loadGLTF(dir + n + '.glb').then((g) => [n, g])));
+  return Object.fromEntries(entries);
+}
+
+function loadNatureAssets() {
+  return loadAssetSet(NATURE_DIR, [
+    'tree_default', 'tree_oak', 'tree_detailed', 'tree_default_fall',
+    'tree_cone', 'tree_cone_dark', 'tree_fat_darkh',
+    'rock_largeA', 'rock_largeC', 'rock_largeE', 'rock_smallB', 'rock_smallD', 'rock_tallA', 'rock_tallC',
+    'plant_bush', 'plant_bushDetailed',
+  ]);
+}
+
+function loadCastleAssets() {
+  return loadAssetSet(CASTLE_DIR, [
+    'wall', 'tower-square-base', 'tower-square-mid-windows', 'tower-square-roof',
+    'gate', 'flag-banner-long',
+  ]);
+}
+
+// GLTFシーンの全メッシュのワールド変換を焼き込み、material.color を頂点カラーとして
+// 単一の非インデックスジオメトリにマージする(既存 pushGeo/colorize と同じ流儀)。
+// tint を渡すと toonifyGLTF で一旦その色に染めてから焼き込む(城のようにテクスチャが無い/使えない場合用)。
+// tint が null なら各メッシュの元の material.color(Kenneyの単色マテリアル)をそのまま焼き込む(木・岩用)。
+function bakeGeometry(gltf, tint = null) {
+  const root = gltf.scene.clone(true);
+  if (tint != null) toonifyGLTF(root, tint);
+  root.updateMatrixWorld(true);
+  const parts = [];
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const src = o.geometry;
+    const g = src.index ? src.toNonIndexed() : src.clone();
+    g.applyMatrix4(o.matrixWorld);
+    const posOnly = new THREE.BufferGeometry();
+    posOnly.setAttribute('position', g.attributes.position);
+    colorize(posOnly, o.material.color.getHex());
+    parts.push(posOnly);
+    g.dispose();
+  });
+  const merged = mergeGeometries(parts);
+  for (const p of parts) p.dispose();
+  return merged;
+}
+
+// 高さ基準で正規化(木用): targetH(m) に高さが合うよう geometry.scale を焼き込む
+function normalizeByHeight(gltf, targetH, tint = null) {
+  const { size } = measureObject(gltf.scene);
+  const k = targetH / Math.max(1e-4, size.y);
+  const geo = bakeGeometry(gltf, tint);
+  geo.scale(k, k, k);
+  return geo;
+}
+
+// 半径基準で正規化(岩・茂み用: 旧 IcosahedronGeometry(1,0) と同じ基準に合わせる)
+function normalizeByRadius(gltf, targetR, tint = null) {
+  const { size } = measureObject(gltf.scene);
+  const k = targetR / Math.max(1e-4, Math.max(size.x, size.z) / 2);
+  const geo = bakeGeometry(gltf, tint);
+  geo.scale(k, k, k);
+  return geo;
+}
+
 // ---------------- 地形メッシュ(単一ジオメトリ・頂点カラー) ----------------
 const PALETTE = {
   grassA: new THREE.Color(0x6fae5a), grassB: new THREE.Color(0x5f9c4d),
@@ -424,93 +495,139 @@ function buildLava(ctx) {
   return mesh;
 }
 
-// ---------------- 古城(魔城)の外観 ----------------
-function buildCastle(ctx) {
-  const stoneGeos = [], roofGeos = [], glowGeos = [];
+// ---------------- 古城(魔城)の外観(Kenney Castle Kit のモジュラーパーツ組み) ----------------
+function buildCastle(ctx, assets) {
   const R = 78, WALL_H = 13, WALL_T = 4;
 
-  const cyl = (r0, r1, h, seg = 8) => new THREE.CylinderGeometry(r0, r1, h, seg, 1);
-  const cone = (r, h, seg = 8) => new THREE.ConeGeometry(r, h, seg, 1);
-  const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+  // --- パーツごとに1体分のジオメトリへ焼き込み(石材はグレー、屋根は濃紺、門は木/鉄) ---
+  const stoneTint = 0x8a8577, roofTint = 0x39304f;
+  const wallGeo = bakeGeometry(assets['wall'], stoneTint);
+  const baseGeo = bakeGeometry(assets['tower-square-base'], stoneTint);
+  const midGeo = bakeGeometry(assets['tower-square-mid-windows'], stoneTint);
+  const roofGeo = bakeGeometry(assets['tower-square-roof'], roofTint);
+  const gateGeo = bakeGeometry(assets['gate'], 0x2a1f1c);
+  const bannerGeo = bakeGeometry(assets['flag-banner-long'], 0x6a2740);
+
+  const wallT = [], baseT = [], midT = [], roofT = [], glowT = [];
 
   // 塔の配置(南=+z が門)。±14°は門の両脇
   const towerAngles = [14, -14, 72, -72, 136, -136, 180].map((d) => (d * Math.PI) / 180);
   const towers = towerAngles.map((a) => ({ a, x: Math.sin(a) * R, z: Math.cos(a) * R }));
 
-  // 城壁(門の間 ±14° は開ける)
+  // 城壁の順路(門の間 ±14° は開ける)
   const order = [14, 72, 136, 180, -136, -72, -14].map((d) => (d * Math.PI) / 180);
+
+  // tower-square-base(足元)→ tower-square-mid-windows × nMid(胴)→ tower-square-roof(尖塔屋根)
+  // を積み上げる。footR: 塔の見た目半径相当(足元スケール) / apexY: 尖塔の頂点高さ(積み上げ後に一致するよう自動計算)
+  const stackTower = (x, z, ry, footR, apexY, nMid) => {
+    const kXZ = footR / 0.5; // パーツの原寸フットプリントは1辺1(半幅0.5)
+    const kY = apexY / (1.01 * (1 + nMid) + 2.01); // base+mid*n の高さ1.01・roofの高さ2.01(原寸)
+    let y = 0;
+    baseT.push({ x, y, z, ry, sx: kXZ, sy: kY, sz: kXZ });
+    y += 1.01 * kY;
+    for (let i = 0; i < nMid; i++) {
+      midT.push({ x, y, z, ry, sx: kXZ, sy: kY, sz: kXZ });
+      y += 1.01 * kY;
+    }
+    roofT.push({ x, y, z, ry, sx: kXZ, sy: kY, sz: kXZ });
+    glowT.push({ x, y: y + 2.01 * kY - 0.6, z }); // 尖塔頂上の妖光(窓の代わり)
+  };
+
+  // 周壁の塔7本
+  for (const t of towers) {
+    const gate = Math.abs(t.a) < 0.5;
+    stackTower(t.x, t.z, t.a, gate ? 5.6 : 7, gate ? 26 : 31, 1);
+  }
+
+  // 城壁(wall.glb をタイル状に並べる。門の間は開けたまま)
+  const tileWall = (ax, az, bx, bz) => {
+    const len = Math.hypot(bx - ax, bz - az);
+    const ry = Math.atan2(-(bz - az), bx - ax);
+    const kY = (WALL_H + 5) / 1.31; // 原寸の壁高さ1.31 → 胸壁込みの目標高さへ
+    const kZ = WALL_T / 1.0;        // 原寸の厚み1 → 目標の壁厚へ
+    const n = Math.max(2, Math.round(len / (kY * 0.85)));
+    for (let k = 0; k < n; k++) {
+      const u = (k + 0.5) / n;
+      wallT.push({ x: lerp(ax, bx, u), y: 0, z: lerp(az, bz, u), ry, sx: len / n, sy: kY, sz: kZ });
+    }
+  };
   for (let i = 0; i < order.length - 1; i++) {
     const ax = Math.sin(order[i]) * R, az = Math.cos(order[i]) * R;
     const bx = Math.sin(order[i + 1]) * R, bz = Math.cos(order[i + 1]) * R;
-    const len = Math.hypot(bx - ax, bz - az);
-    const ry = Math.atan2(-(bz - az), bx - ax);
-    const mx = (ax + bx) / 2, mz = (az + bz) / 2;
-    pushGeo(stoneGeos, box(len + 2, WALL_H + 5, WALL_T), mx, WALL_H / 2 - 2.5, mz, 0, ry, 0);
-    pushGeo(stoneGeos, box(len + 2, 1.7, WALL_T + 1.4), mx, WALL_H + 0.85, mz, 0, ry, 0); // 胸壁
+    tileWall(ax, az, bx, bz);
   }
 
-  // 塔(円筒 + 尖塔屋根)+ 妖光の窓
-  for (const t of towers) {
-    const gate = Math.abs(t.a) < 0.5;
-    const r = gate ? 5.6 : 7, h = gate ? 22 : 27;
-    pushGeo(stoneGeos, cyl(r, r * 1.15, h + 4, 8), t.x, h / 2 - 2, t.z);
-    pushGeo(roofGeos, cone(r * 1.35, gate ? 8 : 10, 8), t.x, h + (gate ? 4 : 5) - 2, t.z);
-    // 窓(外向き)
-    const wy = h - 6;
-    pushGeo(glowGeos, box(0.8, 1.7, 0.3), t.x + Math.sin(t.a) * r, wy, t.z + Math.cos(t.a) * r, 0, t.a, 0);
-  }
+  // 中央天守(主塔 + 側塔2 + 後方尖塔)— 城壁より高く威容を出す(同じパーツの使い回し)
+  stackTower(0, -8, 0, 13, 65, 1);
+  stackTower(16, -2, 0, 6, 52.5, 2);
+  stackTower(-16, -2, 0, 6, 52.5, 2);
+  stackTower(0, -26, 0, 5, 72.5, 3);
 
-  // 門楼(門洞 = 暗い奥行き)
-  pushGeo(stoneGeos, box(5, 17, 7), -8.5, 8.5 - 2, R - 1);
-  pushGeo(stoneGeos, box(5, 17, 7), 8.5, 8.5 - 2, R - 1);
-  pushGeo(stoneGeos, box(22, 5.5, 7), 0, 15.5, R - 1);   // まぐさ石
-  pushGeo(roofGeos, box(24, 1.6, 8.4), 0, 18.9, R - 1);
-
-  // 中央天守(主塔 + 側塔 + 後方尖塔)— 城壁より高く威容を出す
-  pushGeo(stoneGeos, box(36, 12, 30), 0, 4, -8);
-  pushGeo(stoneGeos, cyl(12.5, 14.5, 48, 10), 0, 30, -8);
-  pushGeo(roofGeos, cone(15.5, 15, 10), 0, 61, -8);
-  pushGeo(stoneGeos, cyl(5, 6, 36, 8), 16, 25, -2);
-  pushGeo(roofGeos, cone(7, 10, 8), 16, 47.5, -2);
-  pushGeo(stoneGeos, cyl(5, 6, 36, 8), -16, 25, -2);
-  pushGeo(roofGeos, cone(7, 10, 8), -16, 47.5, -2);
-  pushGeo(stoneGeos, cyl(3.6, 4.4, 56, 8), 0, 32, -26);
-  pushGeo(roofGeos, cone(5.4, 13, 8), 0, 66, -26);
-
-  // 天守の窓(四方 + 高層)
-  const keepWin = [
-    [0, 40, 1], [0, 48, 1], [0.6, 32, 1], [-0.6, 32, 1],
-    [Math.PI, 40, 1], [Math.PI, 48, 1],
-    [Math.PI / 2, 44, 1], [-Math.PI / 2, 44, 1],
-  ];
-  for (const [a, y] of keepWin) {
-    pushGeo(glowGeos, box(1.0, 2.2, 0.3), Math.sin(a) * 13.6, y, -8 + Math.cos(a) * 13.6, 0, a, 0);
-  }
-  pushGeo(glowGeos, box(0.9, 1.8, 0.3), 0, 54, -26 + 4.3);
-  pushGeo(glowGeos, box(0.9, 1.8, 0.3), 16, 39, -2 + 5.2);
-  pushGeo(glowGeos, box(0.9, 1.8, 0.3), -16, 39, -2 + 5.2);
-
-  const stoneMat = toonMaterial(0x565064);
-  const roofMat = toonMaterial(0x39304f);
-  const glowMat = glowMaterial(0x9a55ff, 1.7);
-
+  // --- グループ組み立て ---
   const group = new THREE.Group();
-  const stone = new THREE.Mesh(facet(mergeGeometries(stoneGeos)), stoneMat);
-  stone.castShadow = true; stone.receiveShadow = true;
-  const roof = new THREE.Mesh(facet(mergeGeometries(roofGeos)), roofMat);
-  roof.castShadow = true;
-  const glow = new THREE.Mesh(mergeGeometries(glowGeos), glowMat);
-  // 門洞の闇
+  const addInst = (geo, transforms) => {
+    if (!transforms.length) return null;
+    const mat = toonMaterial(0xffffff, { vertexColors: true });
+    const mesh = new THREE.InstancedMesh(facet(geo), mat, transforms.length);
+    for (let i = 0; i < transforms.length; i++) {
+      const t = transforms[i];
+      composeAt(mesh, i, t.x, t.y, t.z, t.ry, t.sx, t.sy, t.sz);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.frustumCulled = false;
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  addInst(wallGeo, wallT);
+  addInst(baseGeo, baseT);
+  addInst(midGeo, midT);
+  addInst(roofGeo, roofT);
+
+  // 妖光(塔頂の紫の発光球。窓明かりの代替)
+  if (glowT.length) {
+    const glowGeo = new THREE.IcosahedronGeometry(0.9, 0);
+    const glowMesh = new THREE.InstancedMesh(glowGeo, glowMaterial(0x9a55ff, 1.8), glowT.length);
+    for (let i = 0; i < glowT.length; i++) {
+      const g = glowT[i];
+      composeAt(glowMesh, i, g.x, g.y, g.z, 0, 1, 1, 1);
+    }
+    glowMesh.instanceMatrix.needsUpdate = true;
+    glowMesh.frustumCulled = false;
+    group.add(glowMesh);
+  }
+
+  // 門(アーチ扉 + 奥の暗闇 + 両脇の垂れ幕)
+  const gateMat = toonMaterial(0xffffff, { vertexColors: true });
+  const gateMesh = new THREE.Mesh(gateGeo, gateMat);
+  gateMesh.position.set(0, 0, R - 3);
+  gateMesh.rotation.y = Math.PI / 2;
+  gateMesh.scale.setScalar(9.5);
+  gateMesh.castShadow = true;
+  group.add(gateMesh);
+
   const voidMesh = new THREE.Mesh(
     new THREE.PlaneGeometry(11, 13),
     new THREE.MeshBasicMaterial({ color: 0x0b0614 })
   );
-  voidMesh.position.set(0, 4.5, R + 2.51);
-  group.add(stone, roof, glow, voidMesh);
+  voidMesh.position.set(0, 4.5, R - 1);
+  group.add(voidMesh);
+
+  const bannerMat = toonMaterial(0xffffff, { vertexColors: true, side: THREE.DoubleSide });
+  for (const a of [towerAngles[0], towerAngles[1]]) {
+    const bx = Math.sin(a) * (R - 4.2), bz = Math.cos(a) * (R - 4.2);
+    const banner = new THREE.Mesh(bannerGeo, bannerMat);
+    banner.position.set(bx, 9, bz);
+    banner.rotation.y = a;
+    banner.scale.setScalar(6);
+    banner.castShadow = true;
+    group.add(banner);
+  }
+
   group.position.set(CASTLE.x, PLATEAU_H - 0.4, CASTLE.z);
   ctx.scene.add(group);
 
-  // --- コライダー(壁は円柱の列で近似・門は開ける) ---
+  // --- コライダー(壁は円柱の列で近似・門は開ける)— 既存ロジックを維持 ---
   const addCol = (lx, lz, radius) => ctx.colliders.push({ x: CASTLE.x + lx, z: CASTLE.z + lz, radius });
   for (let i = 0; i < order.length - 1; i++) {
     const ax = Math.sin(order[i]) * R, az = Math.cos(order[i]) * R;
@@ -710,6 +827,7 @@ function buildGrass(ctx) {
 
 // 木/岩/茂み等の共通ビルダー: 変換リスト → InstancedMesh
 function instancedFrom(ctx, geo, transforms, { shadow = true, tint = null } = {}) {
+  if (!transforms.length) return null;
   const mat = toonMaterial(0xffffff, { vertexColors: true });
   const mesh = new THREE.InstancedMesh(facet(geo), mat, transforms.length);
   mesh.frustumCulled = false;
@@ -724,28 +842,14 @@ function instancedFrom(ctx, geo, transforms, { shadow = true, tint = null } = {}
   return mesh;
 }
 
-function treeGeo(kind) {
-  const parts = [];
-  if (kind === 'broadleaf') {
-    pushGeo(parts, colorize(new THREE.CylinderGeometry(0.22, 0.42, 3.0, 6), 0x6b4a33), 0, 1.5, 0);
-    pushGeo(parts, colorize(new THREE.IcosahedronGeometry(1.95, 0), 0x3f8a4f), 0, 3.9, 0, 0, 0, 0, 1, 0.88, 1);
-    pushGeo(parts, colorize(new THREE.IcosahedronGeometry(1.45, 0), 0x357a48), 1.0, 3.1, 0.55, 0, 0.7, 0);
-    pushGeo(parts, colorize(new THREE.IcosahedronGeometry(1.3, 0), 0x46955a), -0.9, 3.3, -0.5, 0, 1.9, 0);
-  } else if (kind === 'pine') {
-    pushGeo(parts, colorize(new THREE.CylinderGeometry(0.18, 0.34, 2.4, 6), 0x5a4030), 0, 1.2, 0);
-    pushGeo(parts, colorize(new THREE.ConeGeometry(1.7, 2.8, 7), 0x2f6b4f), 0, 3.2, 0);
-    pushGeo(parts, colorize(new THREE.ConeGeometry(1.3, 2.4, 7), 0x2a6248), 0, 4.6, 0);
-    pushGeo(parts, colorize(new THREE.ConeGeometry(0.9, 2.0, 7), 0x337052), 0, 5.9, 0);
-  } else { // dead
-    pushGeo(parts, colorize(new THREE.CylinderGeometry(0.14, 0.36, 3.6, 5), 0x4a3b30), 0, 1.8, 0, 0, 0, 0.06);
-    pushGeo(parts, colorize(new THREE.CylinderGeometry(0.05, 0.11, 1.6, 4), 0x453629), 0.5, 2.9, 0, 0, 0, -0.9);
-    pushGeo(parts, colorize(new THREE.CylinderGeometry(0.04, 0.09, 1.3, 4), 0x453629), -0.45, 2.3, 0.1, 0.5, 0, 0.9);
-    pushGeo(parts, colorize(new THREE.CylinderGeometry(0.04, 0.08, 1.1, 4), 0x40312a), 0.1, 3.4, -0.4, -0.7, 0, 0.2);
-  }
-  return mergeGeometries(parts);
+// transforms を rand() で n 個のバケツにランダム分割(バリエーションごとに別 InstancedMesh にするため)
+function partitionN(list, n, rand) {
+  const buckets = Array.from({ length: n }, () => []);
+  for (const item of list) buckets[Math.floor(rand() * n) % n].push(item);
+  return buckets;
 }
 
-function buildVegetation(ctx) {
+function buildVegetation(ctx, nature) {
   const rand = mulberry32(0x7EE5EED);
   buildGrass(ctx);
 
@@ -817,25 +921,36 @@ function buildVegetation(ctx) {
     flowers.push({ x, y: getHeight(x, z), z, ry: rand() * Math.PI * 2, sx: s, sy: s, sz: s, k: (rand() * 4) | 0 });
   });
 
-  instancedFrom(ctx, treeGeo('broadleaf'), broad, {
-    tint: (c, t) => c.setRGB(0.85 + ((t.x * 13.7) % 1 + 1) % 1 * 0.3, 0.9 + ((t.z * 7.3) % 1 + 1) % 1 * 0.2, 0.85),
-  });
-  instancedFrom(ctx, treeGeo('pine'), pines, {
-    tint: (c, t) => c.setRGB(0.9, 0.9 + ((t.x * 5.1) % 1 + 1) % 1 * 0.2, 0.9),
-  });
-  instancedFrom(ctx, treeGeo('dead'), deads, {});
-  const rockGeo = colorize(new THREE.IcosahedronGeometry(1, 0), 0xffffff);
-  instancedFrom(ctx, rockGeo, rocks, {
-    tint: (c, t) => {
-      if (t.v) c.setRGB(0.42, 0.3, 0.25); else c.setRGB(0.55, 0.53, 0.47);
-      const m = 0.85 + ((t.x * 3.3 + t.z * 1.7) % 1 + 1) % 1 * 0.3;
-      c.multiplyScalar(m);
-    },
-  });
-  const bushGeo = colorize(new THREE.IcosahedronGeometry(1, 0), 0x4a8748);
-  instancedFrom(ctx, bushGeo, bushes, {
-    tint: (c, t) => c.setScalar(0.8 + ((t.z * 9.1) % 1 + 1) % 1 * 0.4),
-  });
+  // 広葉樹: Kenney tree_default / tree_oak / tree_detailed / tree_default_fall の4種にランダム分割
+  const broadNames = ['tree_default', 'tree_oak', 'tree_detailed', 'tree_default_fall'];
+  const broadGeos = [5.2, 5.0, 5.3, 5.2].map((h, i) => normalizeByHeight(nature[broadNames[i]], h));
+  const broadTint = (c, t) => c.setRGB(0.85 + ((t.x * 13.7) % 1 + 1) % 1 * 0.3, 0.9 + ((t.z * 7.3) % 1 + 1) % 1 * 0.2, 0.85);
+  partitionN(broad, broadGeos.length, rand).forEach((arr, i) => instancedFrom(ctx, broadGeos[i], arr, { tint: broadTint }));
+
+  // 針葉樹: tree_cone / tree_cone_dark の2種
+  const pineGeos = [normalizeByHeight(nature['tree_cone'], 5.4), normalizeByHeight(nature['tree_cone_dark'], 5.4)];
+  const pineTint = (c, t) => c.setRGB(0.9, 0.9 + ((t.x * 5.1) % 1 + 1) % 1 * 0.2, 0.9);
+  partitionN(pines, pineGeos.length, rand).forEach((arr, i) => instancedFrom(ctx, pineGeos[i], arr, { tint: pineTint }));
+
+  // 火山の枯木: 焦げた広葉樹(tree_fat_darkh)+ ゴツゴツした岩(rock_tallC)で荒涼感を近似
+  const deadGeos = [normalizeByHeight(nature['tree_fat_darkh'], 4.2), normalizeByHeight(nature['rock_tallC'], 3.0)];
+  const deadTint = (c) => c.multiplyScalar(0.68 + ((c.r * 97) % 1) * 0.12);
+  partitionN(deads, deadGeos.length, rand).forEach((arr, i) => instancedFrom(ctx, deadGeos[i], arr, { tint: deadTint }));
+
+  // 岩: 大小の Kenney rock を6種、既存の色(dirt/grass)を活かし乗算でトーンを合わせる
+  const rockNames = ['rock_largeA', 'rock_largeC', 'rock_largeE', 'rock_smallB', 'rock_smallD', 'rock_tallA'];
+  const rockGeos = rockNames.map((n) => normalizeByRadius(nature[n], 1));
+  const rockTint = (c, t) => {
+    const m = 0.85 + ((t.x * 3.3 + t.z * 1.7) % 1 + 1) % 1 * 0.3;
+    c.multiplyScalar(m);
+    if (t.v) c.multiplyScalar(0.6); // 火山: 焦げた岩肌
+  };
+  partitionN(rocks, rockGeos.length, rand).forEach((arr, i) => instancedFrom(ctx, rockGeos[i], arr, { tint: rockTint }));
+
+  // 茂み: plant_bush / plant_bushDetailed の2種
+  const bushGeos = [normalizeByRadius(nature['plant_bush'], 1), normalizeByRadius(nature['plant_bushDetailed'], 1)];
+  const bushTint = (c, t) => c.multiplyScalar(0.8 + ((t.z * 9.1) % 1 + 1) % 1 * 0.4);
+  partitionN(bushes, bushGeos.length, rand).forEach((arr, i) => instancedFrom(ctx, bushGeos[i], arr, { tint: bushTint }));
 
   // 花: 十字の花弁(instanceColor で色変え)
   const petalParts = [];
@@ -869,13 +984,17 @@ function applyGrassQuality(q) {
 export async function init(ctx) {
   resolveFlatSpots();
 
+  // Kenney製GLB(木・岩・城)の読み込みは地形生成と並行して進める
+  const natureLoad = loadNatureAssets();
+  const castleLoad = loadCastleAssets();
+
   buildTerrain(ctx);
   buildWater(ctx);
   buildLava(ctx);
-  buildCastle(ctx);
+  buildCastle(ctx, await castleLoad);
   buildRuins(ctx);
   buildMountains(ctx);
-  buildVegetation(ctx);
+  buildVegetation(ctx, await natureLoad);
 
   ctx.world = {
     getHeight,

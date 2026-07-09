@@ -2,7 +2,10 @@
 // 契約: ARCHITECTURE.md — ctx.shrines = { list, completedCount, active }
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { toonMaterial, glowMaterial, clamp, lerp, smoothstep, damp, canvasTexture, TMP } from './util.js';
+import {
+  toonMaterial, glowMaterial, clamp, lerp, smoothstep, damp, canvasTexture, TMP,
+  loadGLTF, toonifyGLTF,
+} from './util.js';
 
 // ---------------- 定数 ----------------
 const CYAN = 0x33e0c8;
@@ -19,6 +22,67 @@ const SHRINE_DEFS = [
 const ROOM_X = 3000, ROOM_Z0 = 3000, ROOM_DZ = 300;
 const ENTER_DIST = 4;      // 入場プロンプト距離
 const PAD_DIST = 1.5;      // 退場円陣の判定距離
+const ROOM_TINTS = [0x6fe8d4, 0x7fc8ff, 0x8fe8a8, 0xff8a4a]; // 部屋ごとの装飾アクセント色
+
+// ---------------- Kenney(CC0)装飾モデル ----------------
+const KDIR = 'assets/kenney/dungeon/';
+const H_SCALE = 6 / 1.1;                 // column/wall(高さ1.1)を部屋の天井高6mへ
+const CHEST_SCALE = 2.3;
+const COLUMN_SCALE = new THREE.Vector3(1.8, H_SCALE, 1.8);
+const WALL_RELIEF_SCALE = new THREE.Vector3(1.0, 2.4, 1.0); // 腰壁程度の浮き彫りパネル
+const BARREL_SCALE = 1.4;
+const ROCKS_SCALE = 1.3;
+const STONES_SCALE = 1.15;
+const BANNER_SCALE = 2.6;
+const TRAP_SCALE = 1.15;
+
+async function loadDungeonAssets() {
+  const [chestG, columnG, barrelG, rocksG, stonesG, wallHalfG, bannerG, trapG] = await Promise.all([
+    loadGLTF(KDIR + 'chest.glb'),
+    loadGLTF(KDIR + 'column.glb'),
+    loadGLTF(KDIR + 'barrel.glb'),
+    loadGLTF(KDIR + 'rocks.glb'),
+    loadGLTF(KDIR + 'stones.glb'),
+    loadGLTF(KDIR + 'wall-half.glb'),
+    loadGLTF(KDIR + 'banner.glb'),
+    loadGLTF(KDIR + 'trap.glb'),
+  ]);
+
+  // 宝箱: 木部をトゥーン化した後、蓋だけ金色で上書き(木部+金蓋の2トーン)
+  toonifyGLTF(chestG.scene, 0xb0855a);
+  const chestLid = chestG.scene.getObjectByName('lid');
+  if (chestLid) toonifyGLTF(chestLid, GOLD_DEEP, { emissive: new THREE.Color(GOLD_DEEP), emissiveIntensity: 0.22 });
+
+  toonifyGLTF(columnG.scene, 0x8a8577);
+  toonifyGLTF(barrelG.scene, 0x7a5738);
+  toonifyGLTF(rocksG.scene, 0x6f6a5c);
+  toonifyGLTF(stonesG.scene, 0x726b5d);
+  toonifyGLTF(wallHalfG.scene, 0x4c4739);
+
+  // トゲ罠: 台座を暗い石、トゲだけ金属色で上書き
+  const trapSpikes = trapG.scene.getObjectByName('spikes');
+  toonifyGLTF(trapG.scene, 0x3c322b);
+  if (trapSpikes) toonifyGLTF(trapSpikes, 0x8c8c86);
+
+  return {
+    chest: chestG.scene, column: columnG.scene, barrel: barrelG.scene,
+    rocks: rocksG.scene, stones: stonesG.scene, wallHalf: wallHalfG.scene,
+    banner: bannerG.scene, trap: trapG.scene,
+  };
+}
+
+// テンプレートを複製して配置(既にトゥーン化済みのマテリアルは共有。tint指定時のみ個別に再着色)
+function placeAsset(parent, template, { x = 0, y = 0, z = 0, ry = 0, scale = 1 } = {}, tint = null) {
+  const inst = template.clone(true);
+  inst.position.set(x, y, z);
+  inst.rotation.y = ry;
+  if (typeof scale === 'number') inst.scale.setScalar(scale);
+  else inst.scale.copy(scale);
+  inst.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  if (tint != null) toonifyGLTF(inst, tint);
+  parent.add(inst);
+  return inst;
+}
 
 // ---------------- モジュール状態 ----------------
 let S = null;
@@ -99,6 +163,14 @@ export async function init(ctx) {
     orb: glowMaterial(CYAN, 2.3),
     candle: glowMaterial(CYAN_SOFT, 2.0, { transparent: true, opacity: 0.92 }),
   };
+
+  // ---- Kenney(CC0)装飾モデルの事前読込(祠内部で使い回す) ----
+  try {
+    S.assets = await loadDungeonAssets();
+  } catch (err) {
+    console.warn('[shrines] 装飾モデルの読込に失敗、プリミティブ装飾で続行', err);
+    S.assets = null;
+  }
 
   buildExteriors(ctx);
   buildRooms(ctx);
@@ -327,12 +399,16 @@ function buildShell(ctx, room) {
     }
   }
 
-  // 柱×6+頂部の光環
+  // 柱×6(Kenneyモデル。読込失敗時はプリミティブへ)+頂部の光環
   for (const px of [-10.5, 10.5]) {
     for (const pz of [9, 0, -8.5]) {
       if (i === 3 && pz !== 9) continue;
-      stone.push(cylAt(0.5, 0.66, 6, 7, px, 2.5, pz));
-      stone.push(boxAt(1.5, 0.35, 1.5, px, 5.62, pz));
+      if (S.assets) {
+        placeAsset(g, S.assets.column, { x: px, y: 0, z: pz, scale: COLUMN_SCALE });
+      } else {
+        stone.push(cylAt(0.5, 0.66, 6, 7, px, 2.5, pz));
+        stone.push(boxAt(1.5, 0.35, 1.5, px, 5.62, pz));
+      }
       const band = torusFlat(0.62, 0.05, 4.7, 16);
       band.translate(px, 0, pz);
       glows.push(band);
@@ -369,7 +445,7 @@ function buildShell(ctx, room) {
   addMesh(g, emblem, makeEmblemMat(), false);
 
   // 間接光(PointLight 2灯)
-  const lightColors = [0x6fe8d4, 0x7fc8ff, 0x8fe8a8, 0xff8a4a];
+  const lightColors = ROOM_TINTS;
   const l1 = new THREE.PointLight(lightColors[i], 60, 36, 2);
   l1.position.set(0, 6, i === 3 ? -4 : 2);
   g.add(l1);
@@ -406,6 +482,31 @@ function buildShell(ctx, room) {
   room.chest = buildChest(g, cx, cz, i === 3 ? -Math.PI / 2 : 0);
   room.chestWorld = new THREE.Vector3(room.origin.x + cx, 0.6, room.origin.z + cz);
   room.colliders.push({ x: room.origin.x + cx, z: room.origin.z + cz, radius: 0.85, height: 1.6 });
+
+  // Kenney製の据え置き装飾(樽・瓦礫・壁面浮き彫り・垂れ幕)— 通行の妨げにならない入口付近に配置
+  if (S.assets) addRoomDecor(room, i);
+}
+
+function addRoomDecor(room, i) {
+  const g = room.group;
+  // 入口脇の樽と瓦礫(手前側の床は全部屋共通で開けている)
+  for (const s of [-1, 1]) {
+    placeAsset(g, S.assets.barrel, { x: s * 11.5, y: 0, z: 13.4, ry: s * 0.4, scale: BARREL_SCALE });
+    placeAsset(g, S.assets.rocks, { x: s * 10.6, y: 0, z: 15.3, ry: s * 1.1, scale: ROCKS_SCALE });
+    placeAsset(g, S.assets.stones, { x: s * 9.4, y: 0, z: 11.6, ry: -s * 0.6, scale: STONES_SCALE });
+  }
+  // 側壁の浮き彫り(柱間の壁面に質感を追加。z=6〜15は全部屋共通で床が実在する安全域)
+  for (const sx of [-1, 1]) {
+    for (const pz of [7.6, 12.4]) {
+      placeAsset(g, S.assets.wallHalf, { x: sx * 12.75, y: 0, z: pz, ry: sx > 0 ? Math.PI : 0, scale: WALL_RELIEF_SCALE });
+    }
+  }
+  // 扉わきの垂れ幕(中仕切りの無い烈火の祠は対象外)
+  if (i !== 3) {
+    for (const s of [-1, 1]) {
+      placeAsset(g, S.assets.banner, { x: s * 4.1, y: 1.5, z: -9.52, ry: 0, scale: BANNER_SCALE }, ROOM_TINTS[i]);
+    }
+  }
 }
 
 function makeRuneFloorTexture(i) {
@@ -485,7 +586,7 @@ function makeEmblemMat() {
   return _emblemMat;
 }
 
-// ---- 宝箱(金装飾) ----
+// ---- 宝箱(Kenneyモデル。読込失敗時はプリミティブ製にフォールバック) ----
 function buildChest(parent, x, z, ry) {
   const M = S.M;
   const g = new THREE.Group();
@@ -493,21 +594,32 @@ function buildChest(parent, x, z, ry) {
   g.rotation.y = ry;
   parent.add(g);
 
-  addMesh(g, boxAt(1.15, 0.6, 0.75, 0, 0.3, 0), M.wood);
-  addMesh(g, merged([
-    boxAt(0.14, 0.64, 0.79, -0.3, 0.3, 0),
-    boxAt(0.14, 0.64, 0.79, 0.3, 0.3, 0),
-    boxAt(0.2, 0.24, 0.08, 0, 0.52, 0.38),
-  ]), M.gold);
+  let lid;
+  if (S.assets) {
+    // chest.glb は chest(木部) > lid(蓋・蝶番位置にピボット済み) の階層を持つ
+    const chestNode = S.assets.chest.clone(true).children[0];
+    chestNode.scale.setScalar(CHEST_SCALE);
+    chestNode.position.set(0, 0, 0);
+    chestNode.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    g.add(chestNode);
+    lid = chestNode.getObjectByName('lid');
+  } else {
+    addMesh(g, boxAt(1.15, 0.6, 0.75, 0, 0.3, 0), M.wood);
+    addMesh(g, merged([
+      boxAt(0.14, 0.64, 0.79, -0.3, 0.3, 0),
+      boxAt(0.14, 0.64, 0.79, 0.3, 0.3, 0),
+      boxAt(0.2, 0.24, 0.08, 0, 0.52, 0.38),
+    ]), M.gold);
 
-  const lid = new THREE.Group();
-  lid.position.set(0, 0.6, -0.375);
-  g.add(lid);
-  addMesh(lid, boxAt(1.15, 0.3, 0.75, 0, 0.15, 0.375), M.wood);
-  addMesh(lid, merged([
-    boxAt(0.14, 0.34, 0.79, -0.3, 0.15, 0.375),
-    boxAt(0.14, 0.34, 0.79, 0.3, 0.15, 0.375),
-  ]), M.gold);
+    lid = new THREE.Group();
+    lid.position.set(0, 0.6, -0.375);
+    g.add(lid);
+    addMesh(lid, boxAt(1.15, 0.3, 0.75, 0, 0.15, 0.375), M.wood);
+    addMesh(lid, merged([
+      boxAt(0.14, 0.34, 0.79, -0.3, 0.15, 0.375),
+      boxAt(0.14, 0.34, 0.79, 0.3, 0.15, 0.375),
+    ]), M.gold);
+  }
 
   // 気の珠(発光ダイヤ)
   const orbGeo = new THREE.OctahedronGeometry(0.3, 0);
@@ -1087,6 +1199,16 @@ function buildRoom3(ctx, room) {
     frame.position.set(tx, -0.82, tz);
     g.add(frame);
     p.tiles.push({ x: tx, z: tz, mesh, frameMat, frame, topY: -3 });
+  }
+
+  // トゲ罠(トロフィー的な装飾。溶岩の縁と島の隅に配置し危険地帯を演出。ギミックには関与しない)
+  if (S.assets) {
+    for (const [tx, tz, ry] of [
+      [-8, 6.8, 0.3], [-3, 6.9, -0.4], [3, 6.9, 0.5], [8, 6.8, -0.2],
+      [9, -15.2, 0.8], [-9, -15.2, -0.6],
+    ]) {
+      placeAsset(g, S.assets.trap, { x: tx, y: 0, z: tz, ry, scale: TRAP_SCALE });
+    }
   }
 
   // 水晶スイッチ(西の島)
