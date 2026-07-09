@@ -120,7 +120,9 @@ function buildShared() {
     fireball: glowMaterial(0xd06bff, 2.4),
     fireHalo: glowMaterial(0xb26bff, 1.2, { transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending }),
     flash: new THREE.MeshBasicMaterial({ color: 0xffffff }),
-    flashSkin: new THREE.MeshBasicMaterial({ color: 0xffffff, skinning: true }),
+    // 注: three.js(このバージョン)ではskinningはmaterialのプロパティではなくobject.isSkinnedMeshで
+    // 自動判定されるため、SkinnedMesh用に別マテリアルにする必要は無いが、区別しておくと将来の調整がしやすい。
+    flashSkin: new THREE.MeshBasicMaterial({ color: 0xffffff }),
   };
 }
 
@@ -133,8 +135,8 @@ function collectFlash(root) {
 
 // ================= 敵モデル =================
 // ゴブリン: Kenney character-orc.glb(骨格アニメーション付き)を複製して使用。
-// テクスチャは同梱されていない("Textures/colormap.png"参照が別ファイルで存在しない)ため、
-// toonifyGLTFでトゥーン調のsolid tintを与える(このゲームの他の敵と統一感のある見た目になる)。
+// toonifyGLTFで軽くtint(内蔵colormapテクスチャは維持したまま)し、このゲームの他の敵と
+// 統一感のあるトゥーン調の見た目にする。
 const GOB_TINT = 0xc8e0c0;
 function buildGoblinModel() {
   const root = new THREE.Group();
@@ -1303,7 +1305,7 @@ export async function init(ctx) {
 
   // --- ゴブリン用リグ付きモデル(一度だけロード。以降はSkeletonUtils.cloneで複製) ---
   const orcGltf = await loadGLTF('assets/kenney/characters/character-orc.glb');
-  toonifyGLTF(orcGltf.scene, GOB_TINT); // 同梱テクスチャが無いためtoon調のsolid tintで統一
+  toonifyGLTF(orcGltf.scene, GOB_TINT); // 内蔵colormapテクスチャを保ったまま軽くtint
   const { size: orcSize } = measureObject(orcGltf.scene);
   const clipMap = new Map(orcGltf.animations.map((c) => [c.name, c]));
   orcAsset = { scene: orcGltf.scene, clipMap, scale: GOB.height / (orcSize.y || 1) };
