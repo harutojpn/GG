@@ -55,6 +55,9 @@ const _fx = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _rgt = new THREE.Vector3();
 const _mv = new THREE.Vector3();
+const _qa = new THREE.Quaternion();
+const _qb = new THREE.Quaternion();
+const _eu = new THREE.Euler();
 
 // ポーズターゲット(毎フレーム使い回し)
 const PT = {
@@ -207,7 +210,7 @@ function buildModel() {
   emb.rotation.x = Math.PI / 2; emb.rotation.z = 0;
   part(new THREE.SphereGeometry(0.045, 7, 6), M.gold, 0, 0.10, 0.035, shield).scale.set(1, 1, 0.55);
 
-  root.userData.rig = { hips, torso, headG, shR, shL, legR, legL, kneeR, kneeL, capMid, inner };
+  root.userData.rig = { hips, torso, headG, shR, shL, legR, legL, kneeR, kneeL, capMid, inner, sword, shield, backSheath, backShieldG, shieldGrip, gripR };
   setArmed(false, true);
   return root;
 }
@@ -580,6 +583,20 @@ export function update(ctx, dt) {
   applyPose(dt, rate);
   if (!action) spinG.rotation.x = damp(spinG.rotation.x, 0, 20, dt);
   root.rotation.y = facing + spinExtra;
+
+  // ---- ガード中は盾を正面へ向ける(ワールド姿勢から局所回転を逆算) ----
+  if (armed) {
+    if (blocking) {
+      shieldGrip.getWorldQuaternion(_qa);
+      _eu.set(-0.18, facing, 0);
+      _qb.setFromEuler(_eu);
+      _qa.invert().multiply(_qb);
+      shield.quaternion.slerp(_qa, 1 - Math.exp(-14 * dt));
+    } else if (shield.parent === shieldGrip) {
+      _qb.set(0, 0, 0, 1);
+      shield.quaternion.slerp(_qb, 1 - Math.exp(-10 * dt));
+    }
+  }
 
   // ---- 頭巾の揺れ(二次アニメ) ----
   const capSway = Math.sin(elapsed * 2.2) * 0.06 + Math.sin(runPhase * 2) * 0.12 * moveAmt;

@@ -557,7 +557,7 @@ const PRESETS = {
     for (let i = 0; i < n; i++) {
       p0(x + rr(-0.25, 0.25) * s, y + rr(0, 0.3), z + rr(-0.25, 0.25) * s);
       if (o && o.color != null) { baseColor(o, 1, 1, 1); tint(0.85, 1.1); }
-      else { const k = R(); P.r = 1.12; P.g = 0.5 + 0.3 * k; P.b = 0.14 + 0.14 * k; }
+      else { const k = R(); P.r = 1.15; P.g = 0.32 + 0.28 * k; P.b = 0.06 + 0.1 * k; }
       const th = R() * Math.PI * 2;
       const sp = rr(0.6, 2.4) * s;
       P.vx = Math.cos(th) * sp; P.vz = Math.sin(th) * sp;
@@ -572,12 +572,12 @@ const PRESETS = {
   // 紫の魔力が弾ける
   magic(x, y, z, o, s) {
     p0(x, y, z);
-    baseColor(o, 0.58, 0.32, 1.1); tint(0.9, 1.0);
+    baseColor(o, 0.55, 0.26, 1.1); tint(0.9, 1.0);
     P.size = 0.85 * s; P.life = 0.16; P.alpha = 0.5; P.grow = 1.5;
     P.fadeIn = 0; P.fadeOut = 0.13;
     poolAdd.spawn();
     const n = cnt(o, 16);
-    baseColor(o, 0.5, 0.22, 1.05);
+    baseColor(o, 0.46, 0.16, 1.05);
     for (let i = 0; i < n; i++) {
       p0(x, y, z);
       tint(0.8, 1.1);
@@ -607,7 +607,7 @@ const PRESETS = {
       P.vy = rr(-0.5, -0.2);
       P.grav = 0.9; P.drag = 0.6; P.flut = 1.6;
       P.rot = R() * 6.28; P.spin = rr(-4, 4);
-      P.life = rr(2.5, 4.5); P.size = rr(0.1, 0.18) * s;
+      P.life = rr(2.5, 4.5); P.size = rr(0.12, 0.2) * s;
       P.fadeIn = 0.2; P.fadeOut = 0.5;
       poolLeaf.spawn();
     }
@@ -652,8 +652,8 @@ function spawnRune(ctx, p) {
   P.r = 0.2; P.g = 0.82; P.b = 0.72;
   P.vy = rr(0.25, 0.6);
   P.flut = 0.25;
-  P.life = rr(2.5, 4); P.size = rr(0.03, 0.07);
-  P.alpha = 0.8; P.pulse = 2.5; P.fadeIn = 0.5; P.fadeOut = 0.8;
+  P.life = rr(2.5, 4); P.size = rr(0.04, 0.09);
+  P.alpha = 0.85; P.pulse = 2.5; P.fadeIn = 0.5; P.fadeOut = 0.8;
   poolAdd.spawn();
 }
 
@@ -665,8 +665,8 @@ function spawnFirefly(ctx, p) {
   P.r = 0.72 * j; P.g = 0.95 * j; P.b = 0.36 * j;
   P.vx = rr(-0.15, 0.15); P.vy = rr(-0.05, 0.12); P.vz = rr(-0.15, 0.15);
   P.flut = 0.7;
-  P.life = rr(5, 9); P.size = rr(0.05, 0.08);
-  P.alpha = 0.9; P.pulse = rr(1.4, 2.8);
+  P.life = rr(5, 9); P.size = rr(0.06, 0.1);
+  P.alpha = 1.0; P.pulse = rr(1.4, 2.8);
   P.fadeIn = 1.0; P.fadeOut = 1.4;
   poolAdd.spawn();
 }
@@ -680,7 +680,7 @@ function spawnForestLeaf(ctx, p) {
   P.vx = rr(-0.3, 0.3); P.vy = rr(-0.55, -0.25); P.vz = rr(-0.3, 0.3);
   P.grav = 0.9; P.drag = 0.6; P.flut = 1.6;
   P.rot = R() * 6.28; P.spin = rr(-4, 4);
-  P.life = rr(4, 7); P.size = rr(0.09, 0.17);
+  P.life = rr(4, 7); P.size = rr(0.11, 0.19);
   P.fadeIn = 0.4; P.fadeOut = 0.6;
   poolLeaf.spawn();
 }
@@ -690,10 +690,10 @@ function spawnEmber(ctx, p) {
   const gy = ctx.getGroundHeight(_ax, _az);
   p0(_ax, gy + rr(0, 1), _az);
   const k = R();
-  P.r = 1.1; P.g = 0.45 + 0.3 * k; P.b = 0.12 + 0.12 * k;
+  P.r = 1.15; P.g = 0.35 + 0.3 * k; P.b = 0.07 + 0.1 * k;
   P.vy = rr(0.8, 2.2);
   P.grav = -0.4; P.flut = 0.6;
-  P.life = rr(1.2, 2.6); P.size = rr(0.04, 0.09);
+  P.life = rr(1.2, 2.6); P.size = rr(0.05, 0.1);
   P.fadeIn = 0.1; P.fadeOut = 0.4;
   poolAdd.spawn();
 }
@@ -718,7 +718,7 @@ function spawnGlint(ctx, p) {
   p0(_ax, w.waterLevel + 0.04, _az);
   const j = rr(0.7, 1.1);
   P.r = 0.8 * j; P.g = 0.98 * j; P.b = 1.0 * j;
-  P.life = rr(0.5, 1.1); P.size = rr(0.03, 0.07);
+  P.life = rr(0.5, 1.1); P.size = rr(0.04, 0.09);
   P.alpha = 0.9; P.pulse = 8; P.fadeIn = 0.15; P.fadeOut = 0.3;
   poolAdd.spawn();
 }
@@ -775,16 +775,16 @@ function ambient(ctx, dt) {
 
   // 夜は蛍(火山・魔城以外)
   if (ctx.time.isNight && biome !== 'volcano' && biome !== 'castle') {
-    pour('firefly', 1.0 * mul, dt, spawnFirefly, ctx, p);
+    pour('firefly', 1.2 * mul, dt, spawnFirefly, ctx, p);
   }
 
   if (biome === 'forest') {
     pour('leaf', 1.4 * mul, dt, spawnForestLeaf, ctx, p);
   } else if (biome === 'volcano') {
-    pour('ember', 3.0 * mul, dt, spawnEmber, ctx, p);
+    pour('ember', 4.0 * mul, dt, spawnEmber, ctx, p);
     pour('heat', 0.7 * mul, dt, spawnHeat, ctx, p);
   } else if (biome === 'lake') {
-    pour('glint', 5.0 * mul, dt, spawnGlint, ctx, p);
+    pour('glint', 6.0 * mul, dt, spawnGlint, ctx, p);
   } else if (biome === 'plains') {
     if (!ctx.time.isNight) pour('fluff', 0.3 * mul, dt, spawnFluff, ctx, p);
   } else if (biome === 'castle') {

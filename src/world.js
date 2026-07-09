@@ -312,9 +312,9 @@ function buildTerrain(ctx) {
     // 道(本道+小道)— 水没部は描かない
     if (h > WATER_LEVEL + 0.3) {
       const rd = roadDist(x, z);
-      if (rd < 6.5) {
-        const rm = 1 - smoothstep(2.8, 6.0, rd);
-        col.lerp(PALETTE.road, rm * (0.82 + cn2 * 0.12));
+      if (rd < 5.2) {
+        const rm = 1 - smoothstep(2.0, 4.8, rd);
+        col.lerp(PALETTE.road, rm * (0.72 + cn2 * 0.1));
       }
     }
 
@@ -466,29 +466,29 @@ function buildCastle(ctx) {
   pushGeo(stoneGeos, box(22, 5.5, 7), 0, 15.5, R - 1);   // まぐさ石
   pushGeo(roofGeos, box(24, 1.6, 8.4), 0, 18.9, R - 1);
 
-  // 中央天守(主塔 + 側塔 + 後方尖塔)
+  // 中央天守(主塔 + 側塔 + 後方尖塔)— 城壁より高く威容を出す
   pushGeo(stoneGeos, box(36, 12, 30), 0, 4, -8);
-  pushGeo(stoneGeos, cyl(12.5, 14.5, 38, 10), 0, 25, -8);
-  pushGeo(roofGeos, cone(15.5, 14, 10), 0, 51, -8);
-  pushGeo(stoneGeos, cyl(5, 6, 30, 8), 16, 22, -2);
-  pushGeo(roofGeos, cone(7, 9.5, 8), 16, 41.5, -2);
-  pushGeo(stoneGeos, cyl(5, 6, 30, 8), -16, 22, -2);
-  pushGeo(roofGeos, cone(7, 9.5, 8), -16, 41.5, -2);
-  pushGeo(stoneGeos, cyl(3.6, 4.4, 46, 8), 0, 27, -26);
-  pushGeo(roofGeos, cone(5.4, 12, 8), 0, 56, -26);
+  pushGeo(stoneGeos, cyl(12.5, 14.5, 48, 10), 0, 30, -8);
+  pushGeo(roofGeos, cone(15.5, 15, 10), 0, 61, -8);
+  pushGeo(stoneGeos, cyl(5, 6, 36, 8), 16, 25, -2);
+  pushGeo(roofGeos, cone(7, 10, 8), 16, 47.5, -2);
+  pushGeo(stoneGeos, cyl(5, 6, 36, 8), -16, 25, -2);
+  pushGeo(roofGeos, cone(7, 10, 8), -16, 47.5, -2);
+  pushGeo(stoneGeos, cyl(3.6, 4.4, 56, 8), 0, 32, -26);
+  pushGeo(roofGeos, cone(5.4, 13, 8), 0, 66, -26);
 
   // 天守の窓(四方 + 高層)
   const keepWin = [
-    [0, 34, 1], [0, 40, 1], [0.6, 28, 1], [-0.6, 28, 1],
-    [Math.PI, 34, 1], [Math.PI, 40, 1],
-    [Math.PI / 2, 36, 1], [-Math.PI / 2, 36, 1],
+    [0, 40, 1], [0, 48, 1], [0.6, 32, 1], [-0.6, 32, 1],
+    [Math.PI, 40, 1], [Math.PI, 48, 1],
+    [Math.PI / 2, 44, 1], [-Math.PI / 2, 44, 1],
   ];
   for (const [a, y] of keepWin) {
     pushGeo(glowGeos, box(1.0, 2.2, 0.3), Math.sin(a) * 13.6, y, -8 + Math.cos(a) * 13.6, 0, a, 0);
   }
-  pushGeo(glowGeos, box(0.9, 1.8, 0.3), 0, 46, -26 + 4.1);
-  pushGeo(glowGeos, box(0.9, 1.8, 0.3), 16, 34, -2 + 5.2);
-  pushGeo(glowGeos, box(0.9, 1.8, 0.3), -16, 34, -2 + 5.2);
+  pushGeo(glowGeos, box(0.9, 1.8, 0.3), 0, 54, -26 + 4.3);
+  pushGeo(glowGeos, box(0.9, 1.8, 0.3), 16, 39, -2 + 5.2);
+  pushGeo(glowGeos, box(0.9, 1.8, 0.3), -16, 39, -2 + 5.2);
 
   const stoneMat = toonMaterial(0x565064);
   const roofMat = toonMaterial(0x39304f);
@@ -628,25 +628,43 @@ function placeOK(x, z, opts = {}) {
 function bladeGeometry() {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
-    -0.07, 0, 0, 0.07, 0, 0, -0.045, 0.55, 0.02,
-    0.045, 0.55, 0.02, 0, 1.05, 0.06,
+    -0.09, 0, 0, 0.09, 0, 0, -0.055, 0.5, 0.02,
+    0.055, 0.5, 0.02, 0, 0.95, 0.06,
   ]), 3));
   g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([
     0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
   ]), 3));
-  // 根元は深緑 → 穂先は明るく
+  // 根元は深緑 → 穂先は明るく(彩度は上品に)
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array([
-    0.30, 0.54, 0.24, 0.30, 0.54, 0.24, 0.42, 0.68, 0.33,
-    0.42, 0.68, 0.33, 0.55, 0.80, 0.42,
+    0.24, 0.45, 0.19, 0.24, 0.45, 0.19, 0.34, 0.58, 0.26,
+    0.34, 0.58, 0.26, 0.46, 0.71, 0.34,
   ]), 3));
   g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(10), 2));
   g.setIndex([0, 1, 2, 1, 3, 2, 2, 3, 4]);
   return g;
 }
 
+// 1インスタンス = 数本の草の束(単発の針より自然でリッチに読める)
+function tuftGeometry() {
+  const blade = bladeGeometry();
+  const rand = mulberry32(0x66A55);
+  const parts = [];
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + rand() * 0.9;
+    const r = i === 0 ? 0 : 0.15 + rand() * 0.38;
+    const s = 0.78 + rand() * 0.5;
+    pushGeo(parts, blade,
+      Math.sin(a) * r, 0, Math.cos(a) * r,
+      (rand() - 0.5) * 0.3, rand() * Math.PI * 2, (rand() - 0.5) * 0.3,
+      s * 1.5, s * (0.7 + rand() * 0.4), s * 1.5);
+  }
+  blade.dispose();
+  return mergeGeometries(parts);
+}
+
 function buildGrass(ctx) {
   const rand = mulberry32(0x6E4A55);
-  GRASS_MAX = 36000;
+  GRASS_MAX = 15000;
   const mat = toonMaterial(0xffffff, { vertexColors: true, side: THREE.DoubleSide });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = grassUniform;
@@ -663,7 +681,7 @@ function buildGrass(ctx) {
       #endif`
     );
   };
-  grassMesh = new THREE.InstancedMesh(bladeGeometry(), mat, GRASS_MAX);
+  grassMesh = new THREE.InstancedMesh(tuftGeometry(), mat, GRASS_MAX);
   grassMesh.frustumCulled = false;
   const c = new THREE.Color();
   let i = 0, guard = 0;
@@ -678,10 +696,10 @@ function buildGrass(ctx) {
     else if (b === 'castle') p = 0.25; // 台地の縁の草
     if (p === 0 || rand() > p) continue;
     if (!placeOK(x, z, { roadGap: 3.0, maxSlope: 0.95, spotGap: 1 })) continue;
-    const s = 0.75 + rand() * 0.8;
-    composeAt(grassMesh, i, x, getHeight(x, z) - 0.03, z, rand() * Math.PI * 2, s, s * (0.8 + rand() * 0.55), s);
-    const dk = b === 'forest' ? 0.78 : 1;
-    c.setRGB((0.85 + rand() * 0.3) * dk, (0.9 + rand() * 0.25) * dk, (0.8 + rand() * 0.3) * dk);
+    const s = 0.7 + rand() * 0.55;
+    composeAt(grassMesh, i, x, getHeight(x, z) - 0.04, z, rand() * Math.PI * 2, s, s * (0.8 + rand() * 0.35), s);
+    const dk = b === 'forest' ? 0.75 : 1;
+    c.setRGB((0.78 + rand() * 0.22) * dk, (0.88 + rand() * 0.2) * dk, (0.72 + rand() * 0.2) * dk);
     grassMesh.setColorAt(i, c);
     i++;
   }
