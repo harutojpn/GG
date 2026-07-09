@@ -1236,6 +1236,7 @@ function updateRoom3(ctx, room, dt) {
 // update(毎フレーム)
 // ======================================================================
 export function update(ctx, dt) {
+  if (typeof window !== 'undefined') { window.__shrDbg = (window.__shrDbg || 0) + 1; window.__shrS = S; }
   if (!S || !S.api) return;
   animateExteriors(ctx, dt);
   S.enterCool = Math.max(0, S.enterCool - dt);

@@ -311,6 +311,7 @@ export async function init(ctx) {
     hp: 60, maxHp: 60,
     // デバッグ用フック(契約外・統合コードは使用しないこと)
     _forceAttack(name) { forceAttack(name); },
+    _dbg() { return { seq, seqT: +seqT.toFixed(2), battle, phase, aiState: ai.state, nearGate, promptOn }; },
   };
 
   // リトライ: ボス戦(または開戦演出)中に gameover / title へ落ちたら撤去して結界復活
