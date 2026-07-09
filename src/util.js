@@ -1,5 +1,6 @@
 // 共有ユーティリティ — 全モジュール共通。編集禁止(契約: ARCHITECTURE.md)
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // ---------------- 乱数(シード付き・決定的) ----------------
 export function mulberry32(seed) {
@@ -155,3 +156,48 @@ export const TMP = {
   q1: new THREE.Quaternion(),
   c1: new THREE.Color(),
 };
+
+// ---------------- GLB読み込み(Kenney等のCC0モデル用) ----------------
+const _gltfLoader = new GLTFLoader();
+const _gltfCache = new Map(); // url → Promise<GLTF>(同一モデルの重複ロードを防ぐ)
+
+// url(例 'assets/kenney/characters/character-human.glb')を読み込みPromiseで返す。結果はキャッシュされる。
+export function loadGLTF(url) {
+  if (!_gltfCache.has(url)) {
+    _gltfCache.set(url, new Promise((resolve, reject) => {
+      _gltfLoader.load(url, resolve, undefined, reject);
+    }));
+  }
+  return _gltfCache.get(url);
+}
+
+// GLTFシーンの全メッシュのマテリアルを、元のtexture/skinningを保ったままトゥーン調に置き換える。
+// tint: 乗算する色(0xffffffなら元の配色のまま)。emissiveIntensity等の追加opts可。
+export function toonifyGLTF(root, tint = 0xffffff, opts = {}) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const src = o.material;
+    const mat = new THREE.MeshToonMaterial({
+      map: src.map || null,
+      color: tint,
+      gradientMap: toonGradientMap(),
+      skinning: !!o.isSkinnedMesh,
+      transparent: src.transparent,
+      alphaTest: src.alphaTest,
+      ...opts,
+    });
+    o.material = mat;
+    o.castShadow = true;
+  });
+  return root;
+}
+
+// バウンディングボックスから正規化スケールを算出(高さ基準 or XZ半径基準)。
+// pushGeo/composeAt 等の既存インスタンス変換(sx,sy,sz)と噛み合うよう、
+// 呼び出し側が「意図した基準寸法」に対する倍率を得るためのヘルパー。
+export function measureObject(root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  return { size, box };
+}
