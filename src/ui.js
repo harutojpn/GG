@@ -146,6 +146,8 @@ function onState(d) {
     R.reticle.classList.remove('on');
     retOn = false;
     R.guide.classList.remove('on');
+    R.vignette.classList.remove('active');
+    lowHp = false;
     if (to === 'title' || to === 'ending') setBossBar(false);
   }
   if (to === 'gameover' || to === 'title' || to === 'ending') cancelDialogs();

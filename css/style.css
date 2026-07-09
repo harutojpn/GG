@@ -336,12 +336,12 @@ body[data-uistate="boss"] #ui-root button { cursor: pointer; }
 .msg-text {
   font-size: 31px; letter-spacing: 0.3em; text-indent: 0.3em;
   color: #f4eeda; padding: 2px 20px;
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.72), 0 0 26px rgba(201, 162, 39, 0.22);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 2px 14px rgba(0, 0, 0, 0.72), 0 0 26px rgba(201, 162, 39, 0.22);
 }
 .msg-sub {
   margin-top: 8px; font-size: 13.5px;
-  letter-spacing: 0.4em; text-indent: 0.4em; color: #c3b284;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  letter-spacing: 0.4em; text-indent: 0.4em; color: #cdbd8e;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 1px 8px rgba(0, 0, 0, 0.65);
 }
 
 /* --------------------------------------------------------------------------
@@ -598,9 +598,10 @@ body[data-uistate="boss"] #ui-root button { cursor: pointer; }
 .seg button:first-child { border-left: none; }
 .seg button:hover { color: #ddd3ac; }
 .seg button.active {
-  background: linear-gradient(180deg, rgba(201, 162, 39, 0.3), rgba(201, 162, 39, 0.13));
-  color: var(--gold-hi);
-  text-shadow: 0 0 8px rgba(201, 162, 39, 0.55);
+  background: linear-gradient(180deg, rgba(201, 162, 39, 0.45), rgba(201, 162, 39, 0.18));
+  color: #f6e7b3;
+  text-shadow: 0 0 8px rgba(201, 162, 39, 0.7);
+  box-shadow: inset 0 0 10px rgba(201, 162, 39, 0.25);
 }
 .set-row input[type="range"] {
   flex: 1; height: 2px; cursor: pointer; outline: none;
