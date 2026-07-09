@@ -1255,7 +1255,7 @@ function setPromptOnce(ctx, text) {
 // ---- 外観の演出 ----
 function animateExteriors(ctx, dt) {
   const t = ctx.time.elapsed;
-  const nightBoost = ctx.time.isNight ? 0.55 : 0;
+  const nightBoost = ctx.time.isNight ? 0.3 : 0;
   for (let i = 0; i < 4; i++) {
     const e = S.exts[i];
     e.runeMat.emissiveIntensity = 1.15 + nightBoost + Math.sin(t * 1.6 + i * 1.7) * 0.25;

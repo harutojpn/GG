@@ -52,7 +52,10 @@ canvas.addEventListener('pointerdown', (e) => {
   firstGesture();
   const s = ctx.state;
   if ((s === 'playing' || s === 'shrine' || s === 'boss') && !document.pointerLockElement) {
-    canvas.requestPointerLock?.();
+    try {
+      const r = canvas.requestPointerLock?.();
+      if (r && typeof r.catch === 'function') r.catch(() => {});
+    } catch { /* iframe等でポインターロック不可 → 下のフリールックで代替 */ }
   }
 });
 addEventListener('pointerup', (e) => {
@@ -60,9 +63,10 @@ addEventListener('pointerup', (e) => {
   if (e.button === 2) mouse.right = false;
 });
 addEventListener('mousemove', (e) => {
-  if (document.pointerLockElement === canvas) {
-    mouse.dx += e.movementX; mouse.dy += e.movementY;
-  } else if (mouse.left || mouse.right) {
+  const s = ctx.state;
+  const inGame = s === 'playing' || s === 'shrine' || s === 'boss';
+  // ポインターロック中 / ゲーム中(ロック不可環境のフリールック) / ドラッグ中 は視点を回す
+  if (document.pointerLockElement === canvas || inGame || mouse.left || mouse.right) {
     mouse.dx += e.movementX; mouse.dy += e.movementY;
   }
 });

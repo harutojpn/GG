@@ -68,7 +68,7 @@ void main(){
   float rim = smoothstep(0.70, 0.97, r) * smoothstep(1.06, 0.97, r);
   col += mag * rim * 1.7;
   float alpha = core * (0.62 + 0.32 * swirl) + rim * 0.95;
-  float n = sin(p.x * 23.0 + p.y * 31.0 + uTime * 3.0) * 0.5 + 0.5;
+  float n = 0.5 + 0.5 * sin(p.x * 21.0 + uTime * 2.0) * sin(p.y * 17.0 - uTime * 2.6);
   alpha *= 1.0 - smoothstep(0.0, 0.25, uBreak * 1.35 - (n * 0.72 + r * 0.28));
   gl_FragColor = vec4(col * (1.0 + uBreak * 2.2), alpha);
 }
@@ -279,7 +279,7 @@ function buildPools() {
 export async function init(ctx) {
   C = ctx;
   const gate = ctx.world.castleGatePos;
-  spawnPos.set(gate.x, 0, gate.z - 20);
+  spawnPos.set(gate.x, 0, gate.z + 18); // 門前広場(南側)に降臨
   spawnPos.y = gY(spawnPos.x, spawnPos.z);
   buildBarrier(gate);
   buildWalls();
@@ -453,6 +453,7 @@ function updateSeq(dt) {
       bossRoot.rotation.set(0, 0, 0);
       ai.heading = 0; // 南(プレイヤー側)を向く
       bossRoot.visible = true;
+      C.camera3p.cinematic('bossIntro'); // 降臨〜咆哮をシネマティックで捉える
       seq = 'descend'; seqT = 0;
     }
   } else if (seq === 'descend') {
@@ -474,7 +475,6 @@ function updateSeq(dt) {
       C.camera3p.shake(0.4);
     }
     if (seqT >= 1.4) {
-      C.camera3p.cinematic('bossIntro');
       seq = 'cine'; seqT = 0;
     }
   } else if (seq === 'cine') {
