@@ -62,7 +62,9 @@ addEventListener('pointerup', (e) => {
   if (e.button === 0) mouse.left = false;
   if (e.button === 2) mouse.right = false;
 });
+const cursor = { x: innerWidth / 2, y: innerHeight / 2 };
 addEventListener('mousemove', (e) => {
+  cursor.x = e.clientX; cursor.y = e.clientY;
   const s = ctx.state;
   const inGame = s === 'playing' || s === 'shrine' || s === 'boss';
   // ポインターロック中 / ゲーム中(ロック不可環境のフリールック) / ドラッグ中 は視点を回す
@@ -70,6 +72,24 @@ addEventListener('mousemove', (e) => {
     mouse.dx += e.movementX; mouse.dy += e.movementY;
   }
 });
+
+// ポインターロック不可環境: カーソルが画面端に達したら連続回転(端で視点が止まる問題の対策)
+const EDGE = 90;            // 端とみなす幅(px)
+const EDGE_SPEED = 1100;    // 最大押し込み時の回転量(px相当/秒)
+function edgeLook(dt) {
+  if (document.pointerLockElement === canvas) return;
+  const s = ctx.state;
+  if (s !== 'playing' && s !== 'shrine' && s !== 'boss') return;
+  const w = innerWidth, h = innerHeight;
+  let px = 0, py = 0;
+  if (cursor.x < EDGE) px = -(EDGE - cursor.x) / EDGE;
+  else if (cursor.x > w - EDGE) px = (cursor.x - (w - EDGE)) / EDGE;
+  if (cursor.y < EDGE) py = -(EDGE - cursor.y) / EDGE;
+  else if (cursor.y > h - EDGE) py = (cursor.y - (h - EDGE)) / EDGE;
+  // 端に深く入るほど速く(2乗カーブで中央付近の誤爆を防ぐ)
+  mouse.dx += px * Math.abs(px) * EDGE_SPEED * dt;
+  mouse.dy += py * Math.abs(py) * EDGE_SPEED * dt;
+}
 addEventListener('wheel', (e) => { mouse.wheel += e.deltaY; }, { passive: true });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -213,6 +233,8 @@ function loop() {
   const dt = clamp(clock.getDelta(), 0, 1 / 20);
   ctx.time.dt = dt;
   ctx.time.elapsed += dt;
+
+  edgeLook(dt);
 
   const s = ctx.state;
   const active = (s === 'playing' || s === 'shrine' || s === 'boss') ? GAMEPLAY
