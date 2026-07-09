@@ -98,7 +98,7 @@ function buildBarrier(gatePos) {
   barrier.position.set(gatePos.x, gatePos.y + 5.2, gatePos.z);
   C.scene.add(barrier);
 
-  gateRingMat = glowMaterial(0xb050ff, 1.7, { flatShading: true });
+  gateRingMat = glowMaterial(0xb050ff, 1.7);
   gateRing = new THREE.Mesh(new THREE.TorusGeometry(7.0, 0.17, 8, 56), gateRingMat);
   gateRing.scale.set(1.04, 0.72, 1);
   gateRing.position.copy(barrier.position);
@@ -158,11 +158,11 @@ function makeLeg(x, z) {
 }
 
 function buildBoss() {
-  matBody = toonMaterial(0x241a36, { flatShading: true, emissive: 0x000000 });
-  matDark = toonMaterial(0x151024, { flatShading: true });
-  matHorn = toonMaterial(0x574a6e, { flatShading: true });
+  matBody = toonMaterial(0x241a36, { emissive: 0x000000 });
+  matDark = toonMaterial(0x151024);
+  matHorn = toonMaterial(0x574a6e);
   eyeMat = glowMaterial(0xb44dff, 2.4);
-  crackMat = glowMaterial(0x8a2be2, 1.5, { flatShading: true });
+  crackMat = glowMaterial(0x8a2be2, 1.5);
   mawMat = glowMaterial(0xa030ff, 0.4);
 
   bossRoot = new THREE.Group();
@@ -252,7 +252,7 @@ function buildBoss() {
 
 function buildPools() {
   for (let i = 0; i < 2; i++) {
-    const mat = glowMaterial(0x9b40ff, 2.0, { transparent: true, opacity: 0.9, flatShading: true });
+    const mat = glowMaterial(0x9b40ff, 2.0, { transparent: true, opacity: 0.9 });
     const mesh = new THREE.Mesh(new THREE.TorusGeometry(1, 0.2, 8, 48), mat);
     mesh.rotation.x = -Math.PI / 2;
     mesh.visible = false;

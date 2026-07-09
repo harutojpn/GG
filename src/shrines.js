@@ -76,14 +76,14 @@ export async function init(ctx) {
 
   // ---- 共有マテリアル ----
   S.M = {
-    extStone: toonMaterial(0x8a8577, { flatShading: true }),
-    wall: toonMaterial(0x4c4739, { flatShading: true }),
-    floor: toonMaterial(0x5b5546, { flatShading: true }),
-    dark: toonMaterial(0x2b2823, { flatShading: true }),
-    door: toonMaterial(0x716b58, { flatShading: true }),
-    mov: toonMaterial(0x7d766a, { flatShading: true }),
-    wood: toonMaterial(0x6e4a2f, { flatShading: true }),
-    gold: glowMaterial(GOLD_DEEP, 0.35, { flatShading: true }),
+    extStone: toonMaterial(0x8a8577),
+    wall: toonMaterial(0x4c4739),
+    floor: toonMaterial(0x5b5546),
+    dark: toonMaterial(0x2b2823),
+    door: toonMaterial(0x716b58),
+    mov: toonMaterial(0x7d766a),
+    wood: toonMaterial(0x6e4a2f),
+    gold: glowMaterial(GOLD_DEEP, 0.35),
     glowAdd: new THREE.MeshBasicMaterial({
       color: CYAN, transparent: true, opacity: 0.55,
       blending: THREE.AdditiveBlending, depthWrite: false,
@@ -96,7 +96,7 @@ export async function init(ctx) {
       color: 0xaef5e8, transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
     }),
-    orb: glowMaterial(CYAN, 2.3, { flatShading: true }),
+    orb: glowMaterial(CYAN, 2.3),
     candle: glowMaterial(CYAN_SOFT, 2.0, { transparent: true, opacity: 0.92 }),
   };
 
@@ -196,7 +196,7 @@ function buildExteriors(ctx) {
     group.position.set(d.x, h, d.z);
     group.rotation.y = yaw;
 
-    const runeMat = glowMaterial(CYAN, 1.3, { flatShading: true });
+    const runeMat = glowMaterial(CYAN, 1.3);
     const flameMat = glowMaterial(0x5ceadb, 1.8, { transparent: true, opacity: 0.9 });
     const beaconMat = new THREE.MeshBasicMaterial({
       color: CYAN, transparent: true, opacity: 0.1,
@@ -556,7 +556,7 @@ function buildRoom0(ctx, room) {
   addMesh(g, merged(obs), S.M.wall);
 
   // 発光スイッチ床
-  p.swMat = glowMaterial(CYAN, 0.45, { flatShading: true });
+  p.swMat = glowMaterial(CYAN, 0.45);
   const sw = addMesh(g, new THREE.BoxGeometry(1.45, 0.1, 1.45), p.swMat, false);
   sw.position.set(g0x(p.swX), 0.05, g0z(p.swZ));
 
@@ -1094,7 +1094,7 @@ function buildRoom3(ctx, room) {
     cylAt(0.42, 0.6, 1.2, 7, -6, 0.6, -14),
     cylAt(0.58, 0.44, 0.2, 7, -6, 1.3, -14),
   ]), S.M.wall);
-  p.crystalMat = glowMaterial(0x8fd8ff, 1.5, { flatShading: true });
+  p.crystalMat = glowMaterial(0x8fd8ff, 1.5);
   const cryGeo = new THREE.OctahedronGeometry(0.42, 0);
   cryGeo.scale(1, 1.35, 1);
   p.crystal = new THREE.Mesh(cryGeo, p.crystalMat);
