@@ -97,11 +97,12 @@ export const dampAngle = (current, target, rate, dt) =>
 let _gradientMap = null;
 export function toonGradientMap() {
   if (_gradientMap) return _gradientMap;
-  // 4段階のセルシェーディング用グラデーション
-  const data = new Uint8Array([90, 150, 210, 255]);
-  const tex = new THREE.DataTexture(data, 4, 1, THREE.RedFormat);
-  tex.minFilter = THREE.NearestFilter;
-  tex.magFilter = THREE.NearestFilter;
+  // 5段階のセルシェーディング用グラデーション(旧4段より階調が豊かで、陰は締まり
+  // ハイライト側は伸びる。バンドの境目に僅かな中間色を挟み「板っぽさ」を軽減)。
+  const data = new Uint8Array([58, 104, 150, 200, 245]);
+  const tex = new THREE.DataTexture(data, data.length, 1, THREE.RedFormat);
+  tex.minFilter = THREE.LinearFilter;   // 境界をほんの少しだけ滑らかに(セル感は保つ)
+  tex.magFilter = THREE.LinearFilter;
   tex.needsUpdate = true;
   _gradientMap = tex;
   return tex;
@@ -125,6 +126,60 @@ export function glowMaterial(color, intensity = 1.2, opts = {}) {
     emissiveIntensity: intensity,
     ...opts,
   });
+}
+
+// リムライト付きトゥーン素材。輪郭に沿って淡い縁光を足し、立体感と高級感を出す。
+// 主役級(勇者・ボス等)向け。opts.rimColor / rimStrength(0.2〜0.6) / rimPower(2〜4)。
+export function rimToon(color, opts = {}) {
+  const {
+    rimColor = 0xdff0ff, rimStrength = 0.35, rimPower = 3.0, ...rest
+  } = opts;
+  const m = new THREE.MeshToonMaterial({ color, gradientMap: toonGradientMap(), ...rest });
+  const uRim = { value: new THREE.Color(rimColor) };
+  const uStr = { value: rimStrength };
+  const uPow = { value: rimPower };
+  m.userData.rim = { uRim, uStr, uPow };
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uRimColor = uRim;
+    shader.uniforms.uRimStrength = uStr;
+    shader.uniforms.uRimPower = uPow;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <opaque_fragment>',
+      `#include <opaque_fragment>
+       {
+         float _rim = pow(1.0 - clamp(dot(normalize(vNormal), normalize(vViewPosition)), 0.0, 1.0), uRimPower);
+         gl_FragColor.rgb += uRimColor * (_rim * uRimStrength);
+       }`
+    );
+  };
+  // three にマテリアル種別のキャッシュを分けさせる(onBeforeCompile 併用時の安全策)
+  m.customProgramCacheKey = () => 'rimToon';
+  return m;
+}
+
+// 反転ハル方式の輪郭線。mesh の子として黒いバックフェースを法線方向に押し出して描く。
+// セル調の締まった輪郭を与える(非スキンメッシュ向け)。thickness は mesh のローカル単位。
+export function addOutline(mesh, opts = {}) {
+  const { color = 0x0b0d14, thickness = 0.03 } = opts;
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(color) }, uThick: { value: thickness } },
+    vertexShader: `
+      uniform float uThick;
+      void main() {
+        vec3 p = position + normalize(normal) * uThick;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor;
+      void main() { gl_FragColor = vec4(uColor, 1.0); }`,
+    side: THREE.BackSide,
+  });
+  const outline = new THREE.Mesh(mesh.geometry, mat);
+  outline.castShadow = false;
+  outline.receiveShadow = false;
+  outline.frustumCulled = mesh.frustumCulled;
+  mesh.add(outline);
+  return outline;
 }
 
 // ---------------- CanvasTexture ヘルパー ----------------
