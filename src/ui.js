@@ -236,9 +236,8 @@ let prevOrbs = -1, prevGems = -1;
 // ---- HUD静穏フェード(探索中は空気のように控えめに) ----
 let hudActiveT = 0, hudIdle = false;
 const HUD_IDLE_DELAY = 4.5; // 無操作でこの秒数後に薄れる
-function wakeHud(reason) {
+function wakeHud() {
   hudActiveT = 0;
-  if (typeof window !== 'undefined') { window.__wake = window.__wake || {}; window.__wake[reason || '?'] = (window.__wake[reason || '?'] || 0) + 1; }
   if (hudIdle) { hudIdle = false; if (R.hud) R.hud.classList.remove('idle'); }
 }
 
@@ -252,7 +251,7 @@ function hudUpdate(dt) {
   if (hp !== prevHp || maxHp !== prevMax) {
     if (prevMax > 0 && maxHp > prevMax) retrigger(R.hearts, 'bless');
     renderHearts(hp, maxHp);
-    if (prevHp >= 0) wakeHud("hp");
+    if (prevHp >= 0) wakeHud();
     prevHp = hp; prevMax = maxHp;
   }
 
@@ -287,7 +286,7 @@ function hudUpdate(dt) {
         }
       } else o.classList.remove('lit');
     }
-    if (prevOrbs >= 0) wakeHud("orb");
+    if (prevOrbs >= 0) wakeHud();
     prevOrbs = orbs;
   }
 
@@ -295,7 +294,7 @@ function hudUpdate(dt) {
   const gems = p.gems | 0;
   if (gems !== prevGems) {
     R.gemCount.textContent = gems;
-    if (prevGems >= 0 && gems > prevGems) { retrigger(R.gems, "pop"); wakeHud("gem"); }
+    if (prevGems >= 0 && gems > prevGems) { retrigger(R.gems, 'pop'); wakeHud(); }
     prevGems = gems;
   }
 
@@ -305,7 +304,6 @@ function hudUpdate(dt) {
   if (busy) hudActiveT = 0; else hudActiveT += dt;
   const idle = !busy && hudActiveT > HUD_IDLE_DELAY;
   if (idle !== hudIdle) { hudIdle = idle; R.hud.classList.toggle('idle', idle); }
-  if (typeof window !== 'undefined') window.__hud = { activeT: Math.round(hudActiveT * 10) / 10, busy, idle, bv: boss.visible, ss: stShow, pc: !!promptCur, lh: lowHp, da: dlg.active };
 
   drawMinimap();
 }
