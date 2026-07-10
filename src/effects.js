@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
@@ -20,6 +21,7 @@ let CTX = null;
 let composer = null;
 let bloomPass = null;
 let gradePass = null;
+let aoPass = null;    // GTAOPass — 接地/隙間/折り目に柔らかい陰(RenderPass直後・Bloom前)
 let poolAdd = null;   // 加算合成: spark / magic / fire / orb / firefly / 光の粒
 let poolAlpha = null; // 通常アルファ: dust / smoke / 綿毛 / 熱の揺らぎ
 let poolLeaf = null;  // 通常アルファ + 葉スプライト(回転あり): leaf / grass
@@ -39,10 +41,10 @@ const GradeShader = {
     tDiffuse: { value: null },
     uTime: { value: 0 },
     uRes: { value: new THREE.Vector2(1280, 720) },
-    uVignette: { value: 0.30 },   // 四隅の減光量(控えめ)
-    uSaturation: { value: 1.055 },// わずかな彩度向上
-    uContrast: { value: 0.10 },   // 弱いS字コントラスト
-    uGrain: { value: 0.014 },     // ごく薄いフィルムグレイン
+    uVignette: { value: 0.24 },   // 四隅の減光量(AOが奥行きを担うぶん控えめに)
+    uSaturation: { value: 1.07 }, // わずかな彩度向上(AOで沈む陰部の色を軽く補償)
+    uContrast: { value: 0.075 },  // 弱いS字コントラスト(AOと二重に締めて黒潰れしないよう緩める)
+    uGrain: { value: 0.012 },     // ごく薄いフィルムグレイン
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -805,11 +807,30 @@ function buildComposer() {
   });
   composer = new EffectComposer(renderer, rt);
   composer.addPass(new RenderPass(scene, camera));
-  bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.38, 0.55, 0.82);
+
+  // アンビエントオクルージョン(GTAO): RenderPass直後・Bloom前に配置。
+  //   output=Default … シーン色に AO を「乗算合成」して次段へ渡す(デバッグ用のAO単体表示にしない)。
+  //   深度/法線は自前で再レンダ。パーティクル(THREE.Points)は GTAOPass 内で isPoints 判定され AO 対象外。
+  //   リニアRT上でAOを掛けてから Bloom へ渡すので、陰になった隙間が余計に発光しない。
+  //   世界スケール≒メートル(樹高~5 / 岩~1 / プレイヤー高~1.8)に合わせた控えめな世界空間半径。
+  aoPass = new GTAOPass(scene, camera, Math.max(1, V2.x), Math.max(1, V2.y));
+  aoPass.output = GTAOPass.OUTPUT.Default;
+  aoPass.updateGtaoMaterial({
+    radius: 1.1,           // 接地部・根元・岩の隙間に効く近距離半径(広げ過ぎると帯状に黒ずむ)
+    distanceExponent: 1.0,
+    thickness: 1.0,
+    scale: 1.0,
+    samples: 16,
+    screenSpaceRadius: false,
+  });
+  composer.addPass(aoPass);
+
+  bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.33, 0.58, 0.82);
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
   gradePass = new ShaderPass(GradeShader);
-  composer.addPass(gradePass); // 表示色空間で色調整(最終段)
+  // 表示色空間で色調整(最終段)。OutputPass の後段なので色空間の二重変換は起きない。
+  composer.addPass(gradePass);
   fitComposer();
 }
 
@@ -825,7 +846,16 @@ function fitComposer() {
       composer.renderTarget2.dispose();
     }
     composer.setPixelRatio(CTX.quality.pixelRatio || 1);
-    composer.setSize(innerWidth, innerHeight);
+    composer.setSize(innerWidth, innerHeight); // 各パス(GTAO含む)へ描画バッファ解像度で setSize が伝播する
+  }
+  // AO 品質: high=フル+高サンプル / medium=軽め / low(=postFX無効)=オフ。
+  if (aoPass && CTX) {
+    const q = CTX.settings.quality;
+    aoPass.enabled = !!CTX.quality.postFX && q !== 'low';
+    // 強度は控えめ(mix(1,ao,intensity) の乗算 — 効かせ過ぎて黒ずまないように)
+    aoPass.blendIntensity = q === 'high' ? 0.55 : 0.42;
+    // サンプル数(変化時のみ内部でシェーダ再コンパイル。同値なら no-op)
+    aoPass.updateGtaoMaterial({ samples: q === 'high' ? 16 : 8 });
   }
   // 解像度依存ユニフォーム(ポイントサイズ・グレイン)
   CTX.renderer.getDrawingBufferSize(V2);

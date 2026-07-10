@@ -2,7 +2,7 @@
 // 契約: ARCHITECTURE.md — ctx.sky = { sunDir, sunLight, setOverride(mode) }
 // dayPhase: 0=夜明け / 0.25=正午 / 0.5=日暮れ / 0.75=真夜中(全て連続補間)
 import * as THREE from 'three';
-import { lerp, smoothstep, damp, toonMaterial, mulberry32 } from './util.js';
+import { lerp, clamp, smoothstep, damp, toonMaterial, mulberry32 } from './util.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---------------- 空ドームシェーダ ----------------
@@ -192,7 +192,7 @@ const SHRINE = {
 // ---------------- モジュール状態 ----------------
 const CLOUD_N = 46;
 let dome, domeU, clouds, cloudMat, cloudBase, cloudSpeed;
-let sun, hemi, fog, bg;
+let sun, rim, fill, hemi, fog, bg;
 let overrideMode = null;
 let shrineB = 0, bossB = 0;
 let flash = 0, boltT = 4;
@@ -202,6 +202,12 @@ const rand = mulberry32(0xa11ce);
 const _sunDir = new THREE.Vector3();
 const _moonDir = new THREE.Vector3();
 const _lightDir = new THREE.Vector3();
+const _azi = new THREE.Vector3();     // 太陽の水平方位(リム/フィルの公転基準)
+const _rimDir = new THREE.Vector3();
+const _fillDir = new THREE.Vector3();
+const _rimCol = new THREE.Color();
+const _fillCol = new THREE.Color();
+const COOL = new THREE.Color(0xbcd2ff); // リム/フィルを少し寒色へ寄せる基準色
 
 // ---------------- 雲(InstancedMesh・低ポリの柔らかい塊) ----------------
 function buildClouds(scene) {
@@ -285,18 +291,32 @@ export async function init(ctx) {
 
   buildClouds(scene);
 
-  // ライティングリグ(直射光は太陽/月を1灯で滑らかに切替)
+  // ライティングリグ(3点照明: キー=太陽/月・フィル・リム + 環境半球光)
+  // キー(直射光): 太陽/月を1灯で滑らかに切替。影を落とすのはこの1灯のみ(規約)
   sun = new THREE.DirectionalLight(0xfff2d8, 2.3);
   sun.castShadow = true;
   const sms = (ctx.quality && ctx.quality.shadowMapSize) || 1024;
   sun.shadow.mapSize.set(sms, sms);
   const sc = sun.shadow.camera;
-  sc.left = -60; sc.right = 60; sc.top = 60; sc.bottom = -60;
-  sc.near = 20; sc.far = 420;
+  // プレイヤー追従の狭域シャドウカメラ。範囲をやや締めて解像度を活かす(輪郭くっきり)
+  sc.left = -54; sc.right = 54; sc.top = 54; sc.bottom = -54;
+  sc.near = 24; sc.far = 400;
   sc.updateProjectionMatrix();
-  sun.shadow.bias = -0.00035;
-  sun.shadow.normalBias = 0.7;
+  // PCFソフト前提: radius で縁を柔らかく、bias/normalBias でアクネと縞(shadow acne)を消す
+  sun.shadow.radius = 3.2;
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.55;
   scene.add(sun, sun.target);
+
+  // リム/バックライト: 太陽の反対側を公転し輪郭に沿う明るい縁を作る。影は落とさない
+  rim = new THREE.DirectionalLight(0xbcd2ff, 0.5);
+  rim.castShadow = false;
+  scene.add(rim, rim.target);
+
+  // フィルライト: 反対側・高所から影側の潰れを防ぐ弱い補助。影は落とさない
+  fill = new THREE.DirectionalLight(0xdfeaff, 0.24);
+  fill.castShadow = false;
+  scene.add(fill, fill.target);
 
   hemi = new THREE.HemisphereLight(0xcfe9fa, 0x6c7c60, 0.95);
   scene.add(hemi);
@@ -400,7 +420,7 @@ export function update(ctx, dt) {
     domeU.uFlash.value = fl;
   }
 
-  // 直射光(昼=太陽の暖色 / 夜=月光の青白 を連続切替)
+  // キー(直射光: 昼=太陽の暖色 / 夜=月光の青白 を連続切替)。少し強めてシャープに
   _lightDir.copy(_sunDir).multiplyScalar(dayW).addScaledVector(_moonDir, 1 - dayW);
   if (shrineB > 0) _lightDir.lerp(SHRINE.dir, shrineB);
   if (_lightDir.lengthSq() < 0.05) _lightDir.set(0.2, 1, 0.1);
@@ -409,11 +429,43 @@ export function update(ctx, dt) {
   sun.position.copy(pp).addScaledVector(_lightDir, 170);
   sun.target.position.copy(pp);
   sun.color.copy(P.light);
-  sun.intensity = P.lightInt + fl * 1.2;
+  sun.intensity = P.lightInt * (1 + 0.15 * dayW) + fl * 1.2;
 
+  // 半球光(環境光): 昼は僅かに下げてキーとの差(=立体感)を作り、影を締める
   hemi.color.copy(P.hemiS);
   hemi.groundColor.copy(P.hemiG);
-  hemi.intensity = P.hemiInt + fl * 0.35;
+  hemi.intensity = P.hemiInt * (1 - 0.10 * dayW) + fl * 0.35;
+
+  // リム/フィルの向き(太陽の水平方位を基準に反対側を公転)
+  _azi.set(_lightDir.x, 0, _lightDir.z);
+  if (_azi.lengthSq() < 1e-4) _azi.set(0, 0, 1);
+  _azi.normalize();
+  const ov = 1 - 0.30 * bossB; // ボス時は補助光を控えめに(荒れた暗さを保つ)
+
+  // リム(バックライト): 反対側・低い → 輪郭に沿う明るい縁。時間帯の空色を少し寒色へ
+  _rimDir.set(-_azi.x, 0.30, -_azi.z).normalize();
+  rim.position.copy(pp).addScaledVector(_rimDir, 200);
+  rim.target.position.copy(pp);
+  _rimCol.copy(P.hemiS).lerp(COOL, 0.5);
+  rim.color.copy(_rimCol);
+  rim.intensity = (0.34 + 0.30 * dayW) * ov + fl * 0.25;
+
+  // フィル: 反対側・高所 → 影側を柔らかく起こす(潰さず・立体感は消さず)。環境色の締め色
+  _fillDir.set(-_azi.x * 0.7, 1.3, -_azi.z * 0.7).normalize();
+  fill.position.copy(pp).addScaledVector(_fillDir, 200);
+  fill.target.position.copy(pp);
+  _fillCol.copy(P.hemiS).lerp(P.hor, 0.35).lerp(COOL, 0.18);
+  fill.color.copy(_fillCol);
+  fill.intensity = (0.16 + 0.14 * dayW) * ov;
+
+  // 露出/トーン: 正午は締め、朝夕は温かく持ち上げ、夜は僅かに。演出時は中庸へ寄せる
+  const hiNoon = smoothstep(0.42, 0.80, elev);
+  const golden = smoothstep(1.05, 1.60, P.glow) * dayW;
+  let expo = 1.03 - 0.08 * hiNoon + 0.09 * golden + 0.02 * nightF;
+  expo = lerp(expo, 1.0, Math.max(bossB, shrineB));
+  expo = clamp(expo, 0.95, 1.15);
+  const rndr = ctx.renderer;
+  if (rndr) rndr.toneMappingExposure = damp(rndr.toneMappingExposure, expo, 2.2, dt);
 
   // 雲のドリフト(位置のみ書き換え・生成なし)
   clouds.visible = shrineB < 0.98;

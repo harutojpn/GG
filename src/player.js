@@ -2,7 +2,8 @@
 // 契約: ARCHITECTURE.md / ctx.player を完全実装
 import * as THREE from 'three';
 import {
-  toonMaterial, clamp, lerp, damp, dampAngle, angleDelta, smoothstep, part, TMP,
+  toonMaterial, rimToon, glowMaterial, addOutline,
+  clamp, lerp, damp, dampAngle, angleDelta, smoothstep, part, TMP,
 } from './util.js';
 
 // ---------------- 定数 ----------------
@@ -79,24 +80,41 @@ function resetPose() {
 }
 
 // ---------------- モデル生成 ----------------
+// 幾何は buildModel 内で一度だけ生成する(毎フレーム生成禁止)。
+// リグGroupのピボット・変数名・階層・ctx契約は不変。見た目だけを豪華にする。
 function buildModel() {
+  const C = (h) => new THREE.Color(h);
+  // 主要マテリアルは rimToon(リムライト付きトゥーン)。金属は強リム+微発光で光沢を出す。
   const M = {
-    tunic: toonMaterial(0x3c8f4f),
-    tunicDk: toonMaterial(0x2f6e3d),
-    skin: toonMaterial(0xf2c69c),
-    hair: toonMaterial(0xe3b34f),
-    white: toonMaterial(0xf0ecdd),
-    boots: toonMaterial(0x6e4a2c),
-    leather: toonMaterial(0x8a6136),
-    dark: toonMaterial(0x40301e),
-    gold: toonMaterial(0xc9a227),
-    navy: toonMaterial(0x2b3a55),
-    steel: toonMaterial(0x9fb2bd),
-    shieldF: toonMaterial(0x44525e),
-    eye: toonMaterial(0x231b12),
-    blade: toonMaterial(0xe8f2f6, { emissive: new THREE.Color(0x33e0c8), emissiveIntensity: 0.38 }),
-    emblem: toonMaterial(0x33e0c8, { emissive: new THREE.Color(0x33e0c8), emissiveIntensity: 1.1 }),
+    tunic:    rimToon(0x3f924f, { rimColor: 0xbdf0cf, rimStrength: 0.30, rimPower: 3.0 }),
+    tunicDk:  rimToon(0x2c6b3a, { rimColor: 0x9fdcb4, rimStrength: 0.26, rimPower: 3.2 }),
+    tunicLt:  rimToon(0x4aa85e, { rimColor: 0xd6f7df, rimStrength: 0.30, rimPower: 3.0 }),
+    skin:     rimToon(0xf4c89b, { rimColor: 0xfff1e2, rimStrength: 0.26, rimPower: 3.3 }),
+    skinDk:   rimToon(0xe0ac81, { rimColor: 0xffe6cf, rimStrength: 0.22, rimPower: 3.4 }),
+    hair:     rimToon(0xe8b84f, { rimColor: 0xfff3c4, rimStrength: 0.36, rimPower: 2.7 }),
+    hairDk:   rimToon(0xcf9c39, { rimColor: 0xffe9a8, rimStrength: 0.30, rimPower: 3.0 }),
+    cream:    rimToon(0xece2c9, { rimColor: 0xffffff, rimStrength: 0.24, rimPower: 3.2 }),
+    boots:    rimToon(0x6d4826, { rimColor: 0xd8b58a, rimStrength: 0.24, rimPower: 3.2 }),
+    leather:  rimToon(0x8a6130, { rimColor: 0xe0bd85, rimStrength: 0.26, rimPower: 3.0 }),
+    dark:     rimToon(0x3b2c1b, { rimColor: 0x8f7a55, rimStrength: 0.22, rimPower: 3.2 }),
+    gold:     rimToon(0xcaa42a, { rimColor: 0xfff2b0, rimStrength: 0.52, rimPower: 2.2, emissive: C(0x5f4a0e), emissiveIntensity: 0.28 }),
+    steel:    rimToon(0xb0c0cd, { rimColor: 0xffffff, rimStrength: 0.58, rimPower: 2.0, emissive: C(0x1a2734), emissiveIntensity: 0.14 }),
+    shieldF:  rimToon(0x3f5c70, { rimColor: 0xbfe6ff, rimStrength: 0.42, rimPower: 2.4, emissive: C(0x12202c), emissiveIntensity: 0.12 }),
+    navy:     rimToon(0x27314b, { rimColor: 0x7f95c8, rimStrength: 0.32, rimPower: 3.0 }),
+    eyeW:     toonMaterial(0xf7f3ea),
+    iris:     rimToon(0x2f86b4, { rimColor: 0xbdefff, rimStrength: 0.4, rimPower: 2.6 }),
+    pupil:    toonMaterial(0x15110d),
+    brow:     toonMaterial(0xb98a2f),
+    mouth:    toonMaterial(0xa35b48),
+    blade:    rimToon(0xdfeef2, { rimColor: 0xaef4e6, rimStrength: 0.46, rimPower: 2.1, emissive: C(0x2ad2bd), emissiveIntensity: 0.34 }),
+    bladeHi:  rimToon(0xf4fbff, { rimColor: 0xffffff, rimStrength: 0.55, rimPower: 1.9, emissive: C(0x46e8d2), emissiveIntensity: 0.55 }),
+    emblem:   glowMaterial(0x33e0c8, 1.4),
+    orb:      glowMaterial(0x3decd2, 1.7),
   };
+
+  // 輪郭線(反転ハル)。締まった黒縁でセル調に。主要シルエットのパーツにのみ付ける。
+  const OUT = 0x0a0d13;
+  const ol = (mesh, t) => { addOutline(mesh, { color: OUT, thickness: t }); return mesh; };
 
   root = new THREE.Group();
   spinG = new THREE.Group(); spinG.position.y = 0.55; root.add(spinG);
@@ -104,56 +122,82 @@ function buildModel() {
   hips = new THREE.Group(); hips.position.y = 0.92; inner.add(hips);
 
   // --- 脚(右=-X / 左=+X。モデルは+Z向き) ---
-  const thighGeo = new THREE.CylinderGeometry(0.078, 0.066, 0.40, 7);
-  const shinGeo = new THREE.CylinderGeometry(0.056, 0.080, 0.32, 7);
-  const footGeo = new THREE.BoxGeometry(0.11, 0.09, 0.20);
-  const cuffGeo = new THREE.CylinderGeometry(0.086, 0.082, 0.09, 7);
+  // カプセル+丸い膝+革ブーツで、角の取れたすらっとした四肢に。
+  const thighGeo = new THREE.CapsuleGeometry(0.088, 0.22, 5, 14);
+  const kneeGeo = new THREE.SphereGeometry(0.083, 12, 9);
+  const shinGeo = new THREE.CylinderGeometry(0.076, 0.10, 0.30, 14);
+  const bootCuffGeo = new THREE.CylinderGeometry(0.10, 0.088, 0.075, 14);
+  const footGeo = new THREE.BoxGeometry(0.115, 0.095, 0.20);
+  const toeGeo = new THREE.SphereGeometry(0.066, 12, 9);
+  const soleGeo = new THREE.BoxGeometry(0.125, 0.035, 0.235);
+  const buckGeo = new THREE.BoxGeometry(0.05, 0.036, 0.024);
   const mkLeg = (sx) => {
     const hip = new THREE.Group(); hip.position.set(sx * 0.105, -0.03, 0); hips.add(hip);
-    part(thighGeo, M.white, 0, -0.20, 0, hip);
+    ol(part(thighGeo, M.cream, 0, -0.18, 0, hip), 0.012);          // 太もも(クリームのタイツ)
     const knee = new THREE.Group(); knee.position.set(0, -0.40, 0); hip.add(knee);
-    part(cuffGeo, M.boots, 0, -0.11, 0, knee);
-    part(shinGeo, M.boots, 0, -0.26, 0, knee);
-    const foot = part(footGeo, M.boots, 0, -0.415, 0.045, knee);
+    part(kneeGeo, M.cream, 0, 0, 0, knee);                         // 膝の丸み
+    ol(part(shinGeo, M.boots, 0, -0.20, 0, knee), 0.014);          // 革ブーツ(すね)
+    ol(part(bootCuffGeo, M.leather, 0, -0.065, 0, knee), 0.012);   // ブーツの折返し口
+    part(buckGeo, M.gold, 0, -0.065, 0.10, knee);                  // 金の留め具
+    const foot = ol(part(footGeo, M.boots, 0, -0.415, 0.05, knee), 0.012); // 足(=bootR/bootL)
+    part(toeGeo, M.boots, 0, -0.425, 0.155, knee).scale.set(0.92, 0.8, 1.15); // 丸いつま先
+    part(soleGeo, M.dark, 0, -0.452, 0.055, knee);                 // 靴底
     return { hip, knee, foot };
   };
   const LR = mkLeg(-1), LL = mkLeg(1);
   legR = LR.hip; kneeR = LR.knee; bootR = LR.foot;
   legL = LL.hip; kneeL = LL.knee; bootL = LL.foot;
 
-  // --- 胴 ---
+  // --- 胴(くびれのある回転体チュニック+広がる裾) ---
   torso = new THREE.Group(); torso.position.y = 0.04; hips.add(torso);
-  const skirt = part(new THREE.CylinderGeometry(0.185, 0.295, 0.30, 7), M.tunic, 0, 0.09, 0, torso);
-  skirt.rotation.y = Math.PI / 7;
-  part(new THREE.CylinderGeometry(0.225, 0.24, 0.075, 7), M.dark, 0, 0.205, 0, torso); // ベルト
-  part(new THREE.BoxGeometry(0.075, 0.06, 0.03), M.gold, 0, 0.205, 0.225, torso);     // バックル
-  part(new THREE.CylinderGeometry(0.155, 0.215, 0.34, 7), M.tunic, 0, 0.385, 0, torso); // 胸
-  part(new THREE.CylinderGeometry(0.105, 0.15, 0.10, 7), M.tunicDk, 0, 0.545, 0, torso); // 襟
+  const V2 = (r, y) => new THREE.Vector2(r, y);
+  const torsoProfile = [
+    V2(0.001, -0.055), V2(0.175, -0.045), V2(0.202, 0.02), V2(0.176, 0.115), // 腰のくびれ
+    V2(0.205, 0.255), V2(0.228, 0.365), V2(0.208, 0.45), V2(0.152, 0.505),   // 胸〜肩口
+    V2(0.10, 0.55), V2(0.001, 0.56),
+  ];
+  ol(part(new THREE.LatheGeometry(torsoProfile, 18), M.tunic, 0, 0, 0, torso), 0.016); // 胴チュニック
+  const skirtProfile = [V2(0.192, 0.055), V2(0.235, -0.05), V2(0.30, -0.17), V2(0.338, -0.265)];
+  const skirt = ol(part(new THREE.LatheGeometry(skirtProfile, 18), M.tunic, 0, 0, 0, torso), 0.016); // 広がる裾
+  part(new THREE.CylinderGeometry(0.342, 0.352, 0.05, 18, 1, true), M.tunicDk, 0, -0.262, 0, torso);  // 裾の暗色縁
+  part(new THREE.CylinderGeometry(0.214, 0.224, 0.078, 18), M.dark, 0, 0.02, 0, torso);   // ベルト(革)
+  ol(part(new THREE.BoxGeometry(0.092, 0.078, 0.042), M.gold, 0, 0.02, 0.206, torso), 0.01); // バックル(金)
+  part(new THREE.CylinderGeometry(0.026, 0.026, 0.02, 8), M.emblem, 0, 0.02, 0.23, torso).rotation.x = Math.PI / 2; // 宝石
+  part(new THREE.CylinderGeometry(0.062, 0.08, 0.10, 12), M.skin, 0, 0.55, 0, torso);      // 首
+  ol(part(new THREE.CylinderGeometry(0.112, 0.16, 0.085, 16), M.tunicDk, 0, 0.505, 0, torso), 0.012); // 襟
+  // 胸元の飾り紐(V字)
+  part(new THREE.BoxGeometry(0.012, 0.16, 0.014), M.cream, -0.03, 0.40, 0.20, torso).rotation.z = 0.28;
+  part(new THREE.BoxGeometry(0.012, 0.16, 0.014), M.cream, 0.03, 0.40, 0.20, torso).rotation.z = -0.28;
   // 背中の鞘・盾アンカー(柄が右肩上・切先が左腰)
   backSheath = new THREE.Group();
   backSheath.position.set(-0.15, 0.50, -0.185);
   backSheath.rotation.set(0.10, 0, -2.60);
   torso.add(backSheath);
-  part(new THREE.BoxGeometry(0.095, 0.74, 0.05), M.leather, 0, 0.44, 0, backSheath);
-  part(new THREE.BoxGeometry(0.11, 0.06, 0.06), M.gold, 0, 0.62, 0, backSheath);
+  ol(part(new THREE.BoxGeometry(0.095, 0.74, 0.055), M.leather, 0, 0.44, 0, backSheath), 0.01); // 鞘本体
+  part(new THREE.BoxGeometry(0.115, 0.062, 0.068), M.gold, 0, 0.62, 0, backSheath); // 鯉口の金具
+  part(new THREE.BoxGeometry(0.10, 0.05, 0.062), M.gold, 0, 0.10, 0, backSheath);   // 鞘尻の金具
   backShieldG = new THREE.Group();
   backShieldG.position.set(0.02, 0.30, -0.27);
   backShieldG.rotation.set(0, Math.PI, 0.08);
   torso.add(backShieldG);
 
-  // --- 腕 ---
-  const upperGeo = new THREE.CylinderGeometry(0.056, 0.05, 0.26, 7);
-  const foreGeo = new THREE.CylinderGeometry(0.052, 0.068, 0.24, 7);
-  const handGeo = new THREE.SphereGeometry(0.056, 7, 6);
-  const padGeo = new THREE.SphereGeometry(0.088, 7, 6);
+  // --- 腕(丸い肩+クリーム袖+革の篭手+拳) ---
+  const shoulderGeo = new THREE.SphereGeometry(0.10, 14, 11);
+  const upperGeo = new THREE.CapsuleGeometry(0.052, 0.17, 4, 12);
+  const elbowGeo = new THREE.SphereGeometry(0.056, 10, 8);
+  const foreGeo = new THREE.CylinderGeometry(0.05, 0.072, 0.235, 12);
+  const wristGeo = new THREE.CylinderGeometry(0.074, 0.074, 0.03, 12);
+  const handGeo = new THREE.SphereGeometry(0.062, 12, 9);
   const mkArm = (sx) => {
     const sh = new THREE.Group(); sh.position.set(sx * 0.265, 0.50, 0); torso.add(sh);
-    const pad = part(padGeo, M.tunic, sx * 0.01, 0.015, 0, sh);
-    pad.scale.set(1, 0.8, 0.9);
-    part(upperGeo, M.white, 0, -0.145, 0, sh);
+    const pad = ol(part(shoulderGeo, M.tunic, sx * 0.006, 0.02, 0, sh), 0.012); // 丸い肩(チュニック)
+    pad.scale.set(1.06, 0.9, 1.0);
+    ol(part(upperGeo, M.cream, 0, -0.15, 0, sh), 0.011);                        // 二の腕(クリーム袖)
     const elb = new THREE.Group(); elb.position.set(0, -0.28, 0); sh.add(elb);
-    part(foreGeo, M.leather, 0, -0.125, 0, elb);
-    part(handGeo, M.skin, 0, -0.27, 0, elb);
+    part(elbowGeo, M.cream, 0, 0, 0, elb);                                      // 肘の丸み
+    ol(part(foreGeo, M.leather, 0, -0.12, 0, elb), 0.012);                      // 前腕の篭手(革)
+    part(wristGeo, M.gold, 0, -0.235, 0, elb);                                  // 手首の金縁
+    ol(part(handGeo, M.skin, 0, -0.29, 0.006, elb), 0.011).scale.set(1.0, 0.94, 1.06); // 拳
     return { sh, elb };
   };
   const AR = mkArm(-1), AL = mkArm(1);
@@ -161,54 +205,96 @@ function buildModel() {
   gripR = new THREE.Group(); gripR.position.set(0, -0.28, 0.01); gripR.rotation.x = 2.35; elbR.add(gripR);
   shieldGrip = new THREE.Group(); shieldGrip.position.set(0.09, -0.15, 0); shieldGrip.rotation.set(0, Math.PI / 2, Math.PI / 2); elbL.add(shieldGrip);
 
-  // --- 頭 ---
+  // --- 頭(彫りのある丸顔・とんがり耳・はっきりした目鼻口・金髪の房) ---
   headG = new THREE.Group(); headG.position.y = 0.585; torso.add(headG);
-  const face = part(new THREE.SphereGeometry(0.155, 9, 8), M.skin, 0, 0.105, 0.012, headG);
-  face.scale.set(0.98, 1, 0.94);
-  // 耳(横に少し尖る)
-  const earGeo = new THREE.ConeGeometry(0.03, 0.09, 4);
-  const earR = part(earGeo, M.skin, -0.15, 0.10, -0.01, headG); earR.rotation.z = Math.PI / 2 + 0.15;
-  const earL = part(earGeo, M.skin, 0.15, 0.10, -0.01, headG); earL.rotation.z = -Math.PI / 2 - 0.15;
-  // 目
-  const eyeGeo = new THREE.BoxGeometry(0.03, 0.062, 0.02);
-  eyeR = part(eyeGeo, M.eye, -0.056, 0.105, 0.148, headG);
-  eyeL = part(eyeGeo, M.eye, 0.056, 0.105, 0.148, headG);
-  // 金髪の前髪
-  const bang = part(new THREE.BoxGeometry(0.21, 0.075, 0.06), M.hair, 0, 0.20, 0.105, headG);
-  bang.rotation.x = 0.28;
-  const tuftR = part(new THREE.BoxGeometry(0.055, 0.12, 0.05), M.hair, -0.105, 0.155, 0.085, headG);
-  tuftR.rotation.set(0.15, 0, 0.25);
-  const tuftL = part(new THREE.BoxGeometry(0.055, 0.12, 0.05), M.hair, 0.105, 0.155, 0.085, headG);
-  tuftL.rotation.set(0.15, 0, -0.25);
-  part(new THREE.BoxGeometry(0.05, 0.09, 0.04), M.hair, 0, 0.155, 0.125, headG).rotation.x = 0.35;
-  // とんがり頭巾(基部+後ろへ垂れる2節)
-  const hood = part(new THREE.ConeGeometry(0.20, 0.26, 8), M.tunic, 0, 0.295, -0.025, headG);
-  hood.rotation.x = -0.30;
-  part(new THREE.CylinderGeometry(0.20, 0.19, 0.085, 8), M.tunicDk, 0, 0.20, -0.005, headG);
+  const face = ol(part(new THREE.SphereGeometry(0.16, 16, 13), M.skin, 0, 0.10, 0.0, headG), 0.016);
+  face.scale.set(0.98, 1.03, 0.97);
+  part(new THREE.SphereGeometry(0.055, 12, 9), M.skin, 0, 0.02, 0.055, headG).scale.set(1.35, 0.7, 1.0); // 顎/頬のふくらみ
+  part(new THREE.SphereGeometry(0.022, 8, 6), M.skin, 0, 0.078, 0.16, headG).scale.set(1.0, 0.85, 1.25); // 鼻先
+  // 耳(とんがり)
+  const earGeo = new THREE.ConeGeometry(0.04, 0.135, 6);
+  const earR = part(earGeo, M.skin, -0.158, 0.095, -0.008, headG); earR.rotation.set(0, 0, Math.PI / 2 + 0.30); earR.scale.set(1, 1, 0.68);
+  const earL = part(earGeo, M.skin, 0.158, 0.095, -0.008, headG); earL.rotation.set(0, 0, -Math.PI / 2 - 0.30); earL.scale.set(1, 1, 0.68);
+  part(new THREE.SphereGeometry(0.016, 6, 5), M.skinDk, -0.152, 0.088, 0.0, headG); // 耳の付け根の陰
+  part(new THREE.SphereGeometry(0.016, 6, 5), M.skinDk, 0.152, 0.088, 0.0, headG);
+  // 目(白目メッシュ=eyeR/eyeL。虹彩・瞳はその子でまばたきに追従。※scale.yはまばたきが上書き)
+  const scleraGeo = new THREE.SphereGeometry(0.05, 12, 9);
+  const irisGeo = new THREE.SphereGeometry(0.03, 10, 8);
+  const pupilGeo = new THREE.SphereGeometry(0.016, 8, 6);
+  const mkEye = (sx) => {
+    const e = part(scleraGeo, M.eyeW, sx * 0.064, 0.108, 0.126, headG);
+    e.scale.set(0.82, 1.12, 0.62);
+    const iris = part(irisGeo, M.iris, sx * 0.006, -0.008, 0.052, e); iris.scale.set(1.0, 0.9, 0.7);
+    part(pupilGeo, M.pupil, sx * 0.006, -0.01, 0.075, e).scale.set(1, 1, 0.6);
+    part(new THREE.SphereGeometry(0.009, 6, 5), M.eyeW, sx * 0.02, 0.02, 0.09, e); // ハイライト
+    return e;
+  };
+  eyeR = mkEye(-1); eyeL = mkEye(1);
+  // 眉(まばたきの影響を受けない別メッシュ)
+  const browGeo = new THREE.BoxGeometry(0.062, 0.017, 0.02);
+  part(browGeo, M.brow, -0.064, 0.162, 0.148, headG).rotation.z = -0.16;
+  part(browGeo, M.brow, 0.064, 0.162, 0.148, headG).rotation.z = 0.16;
+  // 口(かすかな微笑み)
+  part(new THREE.BoxGeometry(0.03, 0.012, 0.018), M.mouth, -0.02, 0.028, 0.152, headG).rotation.z = 0.32;
+  part(new THREE.BoxGeometry(0.03, 0.012, 0.018), M.mouth, 0.02, 0.028, 0.152, headG).rotation.z = -0.32;
+  // 金髪の房(前髪・もみあげ・えり足)
+  const lockGeo = new THREE.ConeGeometry(0.052, 0.15, 7);
+  const addLock = (x, y, z, rx, rz, s, mat) => {
+    const m = part(lockGeo, mat || M.hair, x, y, z, headG);
+    m.rotation.set(rx, 0, rz); m.scale.set(s, s * 1.15, s * 0.62); return m;
+  };
+  addLock(0.0, 0.225, 0.115, 2.55, 0, 1.05);            // 前髪中央
+  addLock(-0.088, 0.212, 0.098, 2.55, 0.22, 0.98);
+  addLock(0.088, 0.212, 0.098, 2.55, -0.22, 0.98);
+  addLock(-0.15, 0.188, 0.052, 2.62, 0.52, 0.86);
+  addLock(0.15, 0.188, 0.052, 2.62, -0.52, 0.86);
+  addLock(-0.158, 0.075, 0.012, 3.02, 0.18, 0.80, M.hairDk); // もみあげ
+  addLock(0.158, 0.075, 0.012, 3.02, -0.18, 0.80, M.hairDk);
+  addLock(-0.072, 0.045, -0.135, 3.42, 0.12, 1.02, M.hairDk); // えり足
+  addLock(0.072, 0.045, -0.135, 3.42, -0.12, 1.02, M.hairDk);
+  addLock(0.0, 0.03, -0.15, 3.5, 0, 1.12, M.hairDk);
+  // とんがり頭巾(縁+基部ドーム→垂れる2節。先が自然に後ろへ垂れる)
+  ol(part(new THREE.CylinderGeometry(0.176, 0.188, 0.078, 18), M.tunicDk, 0, 0.235, -0.008, headG), 0.012); // 縁
+  const hoodBase = ol(part(new THREE.ConeGeometry(0.186, 0.30, 18), M.tunic, 0, 0.335, -0.028, headG), 0.014); // 基部
+  hoodBase.rotation.x = -0.20;
   capMid = new THREE.Group(); capMid.position.set(0, 0.385, -0.09); headG.add(capMid);
-  part(new THREE.ConeGeometry(0.098, 0.26, 7), M.tunic, 0, 0.11, 0, capMid);
+  ol(part(new THREE.ConeGeometry(0.10, 0.28, 15), M.tunic, 0, 0.11, 0, capMid), 0.012);
   capTip = new THREE.Group(); capTip.position.set(0, 0.225, 0); capMid.add(capTip);
-  part(new THREE.ConeGeometry(0.047, 0.22, 6), M.tunic, 0, 0.09, 0, capTip);
-  part(new THREE.SphereGeometry(0.028, 6, 5), M.tunicDk, 0, 0.205, 0, capTip);
+  ol(part(new THREE.ConeGeometry(0.05, 0.24, 12), M.tunic, 0, 0.10, 0, capTip), 0.01);
+  part(new THREE.SphereGeometry(0.033, 10, 8), M.tunicDk, 0, 0.215, 0, capTip); // 房先の玉
 
-  // --- 剣(グリップ原点、+Yが刃先) ---
+  // --- 剣(グリップ原点、+Yが刃先。刃・鍔・柄・宝珠まで作り込み) ---
   sword = new THREE.Group();
-  const blade = part(new THREE.BoxGeometry(0.052, 0.60, 0.016), M.blade, 0, 0.415, 0, sword);
-  blade.scale.z = 1; blade.geometry.translate(0, 0, 0);
-  const tip = part(new THREE.ConeGeometry(0.037, 0.09, 4), M.blade, 0, 0.755, 0, sword);
-  tip.rotation.y = Math.PI / 4; tip.scale.z = 0.3;
-  part(new THREE.BoxGeometry(0.16, 0.038, 0.05), M.gold, 0, 0.105, 0, sword);
-  part(new THREE.CylinderGeometry(0.021, 0.021, 0.15, 6), M.navy, 0, 0.015, 0, sword);
-  part(new THREE.SphereGeometry(0.032, 6, 5), M.gold, 0, -0.065, 0, sword);
+  ol(part(new THREE.BoxGeometry(0.062, 0.60, 0.024), M.blade, 0, 0.42, 0, sword), 0.006);   // 刃
+  part(new THREE.BoxGeometry(0.018, 0.55, 0.03), M.bladeHi, 0, 0.42, 0, sword);              // 中央樋(明色)
+  const tip = ol(part(new THREE.ConeGeometry(0.044, 0.13, 4), M.blade, 0, 0.775, 0, sword), 0.006); // 切先
+  tip.rotation.y = Math.PI / 4; tip.scale.set(1, 1, 0.38);
+  ol(part(new THREE.BoxGeometry(0.205, 0.046, 0.062), M.gold, 0, 0.10, 0, sword), 0.008);    // 鍔(十字)
+  part(new THREE.SphereGeometry(0.032, 10, 7), M.gold, -0.102, 0.10, 0, sword);              // 鍔端の玉
+  part(new THREE.SphereGeometry(0.032, 10, 7), M.gold, 0.102, 0.10, 0, sword);
+  part(new THREE.CylinderGeometry(0.023, 0.023, 0.15, 12), M.navy, 0, 0.015, 0, sword);      // 柄
+  for (let i = 0; i < 4; i++) {                                                              // 握りの巻き
+    part(new THREE.TorusGeometry(0.024, 0.006, 6, 12), M.dark, 0, -0.03 + i * 0.036, 0, sword).rotation.x = Math.PI / 2;
+  }
+  part(new THREE.SphereGeometry(0.036, 12, 9), M.gold, 0, -0.05, 0, sword);                  // 柄頭(金の台座)
+  part(new THREE.SphereGeometry(0.024, 12, 10), M.orb, 0, -0.082, 0, sword);                 // 宝珠(シアン発光)
 
-  // --- 丸盾(+Zが表) ---
+  // --- 丸盾(+Zが表。縁の金属・中央エンブレム発光・面のベベル) ---
   shield = new THREE.Group();
-  const sf = part(new THREE.CylinderGeometry(0.26, 0.235, 0.045, 12), M.shieldF, 0, 0, 0, shield);
-  sf.rotation.x = Math.PI / 2;
-  const rim = part(new THREE.TorusGeometry(0.245, 0.026, 6, 12), M.gold, 0, 0, 0.02, shield);
-  const emb = part(new THREE.CylinderGeometry(0.095, 0.095, 0.022, 3), M.emblem, 0, -0.01, 0.032, shield);
-  emb.rotation.x = Math.PI / 2; emb.rotation.z = 0;
-  part(new THREE.SphereGeometry(0.045, 7, 6), M.gold, 0, 0.10, 0.035, shield).scale.set(1, 1, 0.55);
+  const body = ol(part(new THREE.CylinderGeometry(0.255, 0.235, 0.05, 26), M.shieldF, 0, 0, 0, shield), 0.012);
+  body.rotation.x = Math.PI / 2;                                                             // 盤面(薄い円盤)
+  const dome = part(new THREE.SphereGeometry(0.242, 26, 13, 0, Math.PI * 2, 0, Math.PI * 0.5), M.shieldF, 0, 0, 0.004, shield);
+  dome.rotation.x = -Math.PI / 2; dome.scale.set(1, 1, 0.26);                                 // 前面のふくらみ(ベベル)
+  ol(part(new THREE.TorusGeometry(0.248, 0.028, 10, 30), M.gold, 0, 0, 0.012, shield), 0.008); // 金の縁
+  for (let i = 0; i < 8; i++) {                                                              // 縁のリベット
+    const a = i / 8 * Math.PI * 2;
+    part(new THREE.SphereGeometry(0.017, 7, 6), M.gold, Math.cos(a) * 0.206, Math.sin(a) * 0.206, 0.03, shield);
+  }
+  const boss = part(new THREE.SphereGeometry(0.062, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), M.gold, 0, 0, 0.052, shield);
+  boss.rotation.x = -Math.PI / 2;                                                            // 中央ボス(金の半球)
+  const emb = part(new THREE.CylinderGeometry(0.088, 0.088, 0.02, 3), M.emblem, 0, 0.004, 0.05, shield); // エンブレム(発光三角)
+  emb.rotation.set(Math.PI / 2, 0, Math.PI);
+  part(new THREE.SphereGeometry(0.03, 12, 10), M.orb, 0, 0.004, 0.075, shield);              // 中心の宝珠
 
   root.userData.rig = { hips, torso, headG, shR, shL, legR, legL, kneeR, kneeL, capMid, inner, sword, shield, backSheath, backShieldG, shieldGrip, gripR };
   setArmed(false, true);
