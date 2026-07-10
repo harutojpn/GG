@@ -303,6 +303,7 @@ const PALETTE = {
   volcano: new THREE.Color(0x6b3a2e), scorch: new THREE.Color(0x45261c),
   sand: new THREE.Color(0xc9b183), bed: new THREE.Color(0x8f8468),
   road: new THREE.Color(0xcdb27f), plaza: new THREE.Color(0x9a927d),
+  dirt: new THREE.Color(0x9c8358),   // 斜面に覗く土(草地→土→岩の中間帯)
 };
 
 function buildTerrain(ctx) {
@@ -367,9 +368,11 @@ function buildTerrain(ctx) {
       if (h < WATER_LEVEL - 0.8) col.lerp(PALETTE.bed, smoothstep(WATER_LEVEL - 0.8, WATER_LEVEL - 5, h));
     }
 
-    // 急斜面は岩肌
-    const sr = smoothstep(0.5, 0.95, slope);
-    if (sr > 0) col.lerp(dv < 240 ? PALETTE.rockDark : PALETTE.rock, sr * 0.8);
+    // 斜面の彩色遷移(草地 → 土 → 岩): 中斜面で土が覗き、急斜面で岩肌へ
+    const dr = smoothstep(0.28, 0.62, slope);
+    if (dr > 0 && dv >= 240) col.lerp(PALETTE.dirt, dr * (0.55 + cn2 * 0.12));
+    const sr = smoothstep(0.6, 1.0, slope);
+    if (sr > 0) col.lerp(dv < 240 ? PALETTE.rockDark : PALETTE.rock, sr * 0.85);
 
     // 城門前広場は踏み固められた石畳風
     {
@@ -723,9 +726,15 @@ function buildMountains(ctx) {
 }
 
 // ---------------- 植生(全て InstancedMesh・シード固定) ----------------
-const grassUniform = { value: 0 };
+const grassUniform = { value: 0 };                       // 風アニメ用 uTime
+const grassPlayerU = { value: new THREE.Vector3(0, 0, 250) }; // フェード中心(プレイヤー水平位置)
+const grassRadiusU = { value: 70 };                      // 追従グラスのフェード半径
 let grassMesh = null, flowerMesh = null;
-let GRASS_MAX = 0, FLOWER_MAX = 0;
+let FLOWER_MAX = 0;
+
+// 追従グラスのグリッド状態(トロイダル巻き取り)
+let G_GRID = 0, G_HALF = 0, G_CELL = 0, G_RADIUS = 0;    // 格子辺数 / 半辺 / セル幅 / フェード半径
+let gCenterI = 0, gCenterJ = 0;                          // 現在の中心セル(整数インデックス)
 
 // 配置の共通チェック(水中・急斜面・道・広場・城内・平坦化スポットを避ける)
 function placeOK(x, z, opts = {}) {
@@ -760,68 +769,178 @@ function bladeGeometry() {
   return g;
 }
 
-// 1インスタンス = 数本の草の束(単発の針より自然でリッチに読める)
+// 1インスタンス = 数本の草の束(クロス配置した細長い葉。単発の針より自然でリッチに読める)
 function tuftGeometry() {
   const blade = bladeGeometry();
   const rand = mulberry32(0x66A55);
   const parts = [];
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2 + rand() * 0.9;
-    const r = i === 0 ? 0 : 0.15 + rand() * 0.38;
-    const s = 0.78 + rand() * 0.5;
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + rand() * 0.8;
+    const r = i === 0 ? 0 : 0.12 + rand() * 0.34;
+    const s = 0.82 + rand() * 0.5;
     pushGeo(parts, blade,
       Math.sin(a) * r, 0, Math.cos(a) * r,
-      (rand() - 0.5) * 0.3, rand() * Math.PI * 2, (rand() - 0.5) * 0.3,
-      s * 1.5, s * (0.7 + rand() * 0.4), s * 1.5);
+      (rand() - 0.5) * 0.28, rand() * Math.PI * 2, (rand() - 0.5) * 0.28,
+      s * 1.55, s * (0.78 + rand() * 0.45), s * 1.55);
   }
   blade.dispose();
   return mergeGeometries(parts);
 }
 
-function buildGrass(ctx) {
-  const rand = mulberry32(0x6E4A55);
-  GRASS_MAX = 15000;
+// ---------------- 追従グラス(プレイヤー周辺を高密度に保つ「草の海」) ----------------
+// 固定数の InstancedMesh をプレイヤー周辺の正方グリッドに配置し、円形フェードで縁を空/フォグに溶かす。
+// プレイヤーが1セルぶん動いたら「はみ出た列/行を反対側へ巻き取る」ことで有限インスタンスで無限草原を表現。
+// 水平位置はセル座標のハッシュジッタで決定的。Y は getHeight で接地。急斜面/水中/道/城/広場/祠内部は間引く(スケール0)。
+
+// 整数セル座標 → [0,1) の決定的ハッシュ(salt で系列を分ける)
+function cellRand(wi, wj, salt) {
+  let h = (Math.imul(wi | 0, 374761393) ^ Math.imul(wj | 0, 668265263) ^ Math.imul(salt | 0, 2246822519)) | 0;
+  h = Math.imul(h ^ (h >>> 15), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+// セル (wi,wj) をインスタンス行列へ直接書き込む(中間オブジェクトを作らず巻き取り時の GC を回避)。
+// 巻き取りのため slot は残差(residue)で決定: slot は wi,wj の mod G で決まり、
+// 新しく入るセルが出ていくセルの slot をちょうど再利用する。生えない場合はスケール0で不可視化。
+// getHeight/slopeAt は候補が早期チェックを通過した時のみ呼ぶ(全再構築時の負荷を抑える)。
+function writeGrassCell(wi, wj) {
+  const ax = ((wi % G_GRID) + G_GRID) % G_GRID;
+  const az = ((wj % G_GRID) + G_GRID) % G_GRID;
+  const slot = az * G_GRID + ax;
+
+  const jx = (cellRand(wi, wj, 1) - 0.5) * G_CELL * 0.92;
+  const jz = (cellRand(wi, wj, 2) - 0.5) * G_CELL * 0.92;
+  const x = wi * G_CELL + jx, z = wj * G_CELL + jz;
+
+  // バイオームごとの生育確率(平原=密, 森=中, 火山=不毛)
+  const b = getBiome(x, z);
+  let p;
+  if (b === 'plains' || b === 'ruins') p = 1;
+  else if (b === 'lake') p = 0.94;
+  else if (b === 'forest') p = 0.72;
+  else if (b === 'castle') p = 0.34;   // 台地の縁の草
+  else p = 0;                          // volcano 等は草を生やさない
+
+  let ok = !(p <= 0 || (p < 1 && cellRand(wi, wj, 6) > p));
+  let h = 0;
+  if (ok) {
+    h = getHeight(x, z);
+    ok = h >= WATER_LEVEL + 0.5                                   // 水中でない
+      && roadDist(x, z) >= 2.2                                    // 道の上でない
+      && Math.hypot(x - CASTLE.x, z - CASTLE.z) >= 92             // 城内でない
+      && !(Math.abs(x) < 64 && z < -512 && z > -652);             // 城門前広場でない
+    for (let i = 0; ok && i < 4; i++) {                           // 祠の平坦化スポット(構造物)
+      const s = FLAT_SPOTS[i];
+      const dx = x - s.x, dz = z - s.z;
+      if (dx * dx + dz * dz < (s.r + 2.5) * (s.r + 2.5)) ok = false;
+    }
+    if (ok && slopeAt(x, z) > 0.9) ok = false;                    // 急斜面でない
+  }
+
+  if (ok) {
+    const sc = 0.75 + cellRand(wi, wj, 3) * 0.7;
+    composeAt(grassMesh, slot, x, h - 0.05, z, cellRand(wi, wj, 4) * Math.PI * 2,
+      sc, sc * (0.82 + cellRand(wi, wj, 5) * 0.5), sc);
+  } else {
+    composeAt(grassMesh, slot, x, -1000, z, 0, 0, 0, 0); // スケール0で不可視
+  }
+}
+
+// 全セルを書き直す(初期構築・遠距離テレポート・品質変更時)
+function rebuildGrass() {
+  for (let wj = gCenterJ - G_HALF; wj <= gCenterJ + G_HALF; wj++)
+    for (let wi = gCenterI - G_HALF; wi <= gCenterI + G_HALF; wi++)
+      writeGrassCell(wi, wj);
+  if (grassMesh) grassMesh.instanceMatrix.needsUpdate = true;
+}
+
+// grassMul(品質)から格子の枚数と半径を決めて InstancedMesh を(再)構築
+function buildGrassSystem(ctx, mul) {
+  if (grassMesh) {
+    ctx.scene.remove(grassMesh);
+    grassMesh.geometry.dispose();
+    grassMesh.material.dispose();
+    grassMesh = null;
+  }
+  const m = clamp(mul ?? 1, 0.1, 1);
+  G_CELL = lerp(0.94, 0.66, m);              // 高品質ほどセルを詰めて高密度に
+  G_HALF = Math.round(lerp(48, 104, m));     // 高品質ほど広い半径
+  G_GRID = G_HALF * 2 + 1;
+  G_RADIUS = G_HALF * G_CELL;                // 正方の内接円までフェード → 正方の縁は不可視
+  grassRadiusU.value = G_RADIUS;
+  const N = G_GRID * G_GRID;                 // high: 209^2≈43.7k / med: ~167^2 / low: ~129^2
+
   const mat = toonMaterial(0xffffff, { vertexColors: true, side: THREE.DoubleSide });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = grassUniform;
-    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
+    sh.uniforms.uPlayer = grassPlayerU;
+    sh.uniforms.uRadius = grassRadiusU;
+    sh.vertexShader = 'uniform float uTime;\nuniform vec3 uPlayer;\nuniform float uRadius;\n' + sh.vertexShader
+      // 風(2〜3周波の揺れ + ゆっくりした突風のうねり)+ 円形の距離フェード
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
         vec2 ip = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
-        float wgt = smoothstep(0.05, 1.0, position.y);
-        float sway = sin(uTime * 1.7 + ip.x * 0.15 + ip.y * 0.13) * 0.55
-                   + sin(uTime * 3.3 + ip.x * 0.37 - ip.y * 0.21) * 0.24;
-        transformed.x += sway * wgt * 0.42;
-        transformed.z += cos(uTime * 1.35 + ip.y * 0.17) * 0.5 * wgt * 0.3;
-      #endif`
-    );
+        float hsh = fract(sin(dot(ip, vec2(12.9898, 78.233))) * 43758.5453);
+        float wgt = smoothstep(0.0, 1.0, position.y);            // 根元0→穂先1
+        float ph = ip.x * 0.15 + ip.y * 0.13 + hsh * 6.2831;
+        float sway = sin(uTime * 1.6 + ph) * 0.5 + sin(uTime * 3.15 + ph * 1.7) * 0.22;
+        float gust = smoothstep(0.15, 1.0, sin(uTime * 0.45 + ip.x * 0.018 + ip.y * 0.022));
+        float bend = (sway + gust * 0.85) * wgt;
+        transformed.x += bend * 0.42;
+        transformed.z += (cos(uTime * 1.2 + ph) * 0.5 + gust * 0.6) * wgt * 0.3;
+        float dpl = length(ip - uPlayer.xz);
+        float fade = 1.0 - smoothstep(uRadius * 0.72, uRadius, dpl);
+        transformed *= fade;                                     // 縁で株を根元へ潰して不可視化
+      #endif`)
+      // 株ごとの明度・色相ばらつき(黄緑〜青緑)を vColor に乗せる
+      .replace('#include <color_vertex>', `#include <color_vertex>
+      #ifdef USE_INSTANCING
+        vec2 ipc = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
+        float hc = fract(sin(dot(ipc, vec2(39.3468, 11.135))) * 24634.6345);
+        vColor.rgb *= (0.78 + hc * 0.42);
+        float hue = hc - 0.5;
+        vColor.r *= 1.0 + hue * 0.14;
+        vColor.b *= 1.0 - hue * 0.16;
+      #endif`);
   };
-  grassMesh = new THREE.InstancedMesh(tuftGeometry(), mat, GRASS_MAX);
-  grassMesh.frustumCulled = false;
-  const c = new THREE.Color();
-  let i = 0, guard = 0;
-  while (i < GRASS_MAX && guard++ < GRASS_MAX * 14) {
-    const x = (rand() * 2 - 1) * 970, z = (rand() * 2 - 1) * 970;
-    const b = getBiome(x, z);
-    let p = 0;
-    if (b === 'plains' || b === 'ruins') p = 0.8;
-    else if (b === 'lake') p = 0.75;
-    else if (b === 'forest') p = 0.5;
-    else if (b === 'volcano') p = Math.hypot(x - VOLCANO.x, z - VOLCANO.z) > 205 ? 0.14 : 0;
-    else if (b === 'castle') p = 0.25; // 台地の縁の草
-    if (p === 0 || rand() > p) continue;
-    if (!placeOK(x, z, { roadGap: 3.0, maxSlope: 0.95, spotGap: 1 })) continue;
-    const s = 0.7 + rand() * 0.55;
-    composeAt(grassMesh, i, x, getHeight(x, z) - 0.04, z, rand() * Math.PI * 2, s, s * (0.8 + rand() * 0.35), s);
-    const dk = b === 'forest' ? 0.75 : 1;
-    c.setRGB((0.78 + rand() * 0.22) * dk, (0.88 + rand() * 0.2) * dk, (0.72 + rand() * 0.2) * dk);
-    grassMesh.setColorAt(i, c);
-    i++;
-  }
-  GRASS_MAX = i;
-  grassMesh.count = i;
+
+  grassMesh = new THREE.InstancedMesh(tuftGeometry(), mat, N);
+  grassMesh.frustumCulled = false;   // プレイヤー追従で常に近傍 & 行列が動くため culling は無効
+  grassMesh.castShadow = false;      // 草は影を落とさない
+  grassMesh.receiveShadow = false;   // 受影も切って軽量化
+  grassMesh.name = 'grass-follow';
+
+  const pp = (ctx.player && ctx.player.position) || { x: 0, z: 250 }; // init 時は開始地点で中心
+  gCenterI = Math.round((pp.x ?? 0) / G_CELL);
+  gCenterJ = Math.round((pp.z ?? 250) / G_CELL);
+  grassPlayerU.value.set(pp.x ?? 0, pp.y ?? 0, pp.z ?? 250);
+  rebuildGrass();
   ctx.scene.add(grassMesh);
+}
+
+// 毎フレーム: プレイヤーの移動ぶんだけ格子を巻き取る(はみ出た列/行のみ再計算・生成なし)
+function updateGrass(ctx) {
+  if (!grassMesh) return;
+  if (ctx.state === 'shrine') { grassMesh.visible = false; return; } // 祠内部では非表示(巻き取りも停止)
+  grassMesh.visible = true;
+  const pp = (ctx.player && ctx.player.position) || ctx.camera.position;
+  grassPlayerU.value.set(pp.x, pp.y, pp.z);
+
+  const ci = Math.round(pp.x / G_CELL);
+  const cj = Math.round(pp.z / G_CELL);
+  const dI = ci - gCenterI, dJ = cj - gCenterJ;
+  if (dI === 0 && dJ === 0) return;
+  if (Math.abs(dI) >= G_GRID || Math.abs(dJ) >= G_GRID) { // 大ジャンプは全再構築
+    gCenterI = ci; gCenterJ = cj; rebuildGrass(); return;
+  }
+  // X 方向の巻き取り(現在の Z 行範囲で新規列を書く)
+  while (gCenterI < ci) { gCenterI++; const wi = gCenterI + G_HALF; for (let wj = gCenterJ - G_HALF; wj <= gCenterJ + G_HALF; wj++) writeGrassCell(wi, wj); }
+  while (gCenterI > ci) { gCenterI--; const wi = gCenterI - G_HALF; for (let wj = gCenterJ - G_HALF; wj <= gCenterJ + G_HALF; wj++) writeGrassCell(wi, wj); }
+  // Z 方向の巻き取り(更新済みの X 列範囲で新規行を書く)
+  while (gCenterJ < cj) { gCenterJ++; const wj = gCenterJ + G_HALF; for (let wi = gCenterI - G_HALF; wi <= gCenterI + G_HALF; wi++) writeGrassCell(wi, wj); }
+  while (gCenterJ > cj) { gCenterJ--; const wj = gCenterJ - G_HALF; for (let wi = gCenterI - G_HALF; wi <= gCenterI + G_HALF; wi++) writeGrassCell(wi, wj); }
+  grassMesh.instanceMatrix.needsUpdate = true;
 }
 
 // 木/岩/茂み等の共通ビルダー: 変換リスト → InstancedMesh
@@ -850,7 +969,7 @@ function partitionN(list, n, rand) {
 
 function buildVegetation(ctx, nature) {
   const rand = mulberry32(0x7EE5EED);
-  buildGrass(ctx);
+  buildGrassSystem(ctx, ctx.quality?.grassMul ?? 1);
 
   const broad = [], pines = [], deads = [], rocks = [], bushes = [], flowers = [];
   const tryN = (n, fn) => { for (let k = 0; k < n; k++) fn(); };
@@ -909,11 +1028,11 @@ function buildVegetation(ctx, nature) {
     const s = 0.55 + rand() * 0.9;
     bushes.push({ x, y: getHeight(x, z) + s * 0.25, z, ry: rand() * Math.PI * 2, sx: s, sy: s * 0.62, sz: s });
   });
-  // 花(平原と湖畔を彩る)
-  tryN(2600, () => {
+  // 花(草の海に合わせて平原と湖畔を彩る)
+  tryN(3400, () => {
     const x = (rand() * 2 - 1) * 940, z = (rand() * 2 - 1) * 940;
     const b = getBiome(x, z);
-    const p = b === 'plains' || b === 'ruins' ? 0.62 : b === 'lake' ? 0.55 : b === 'forest' ? 0.12 : 0;
+    const p = b === 'plains' || b === 'ruins' ? 0.66 : b === 'lake' ? 0.58 : b === 'forest' ? 0.12 : 0;
     if (rand() > p) return;
     if (!placeOK(x, z, { roadGap: 3.2, maxSlope: 0.6, spotGap: 1 })) return;
     const s = 0.75 + rand() * 0.7;
@@ -973,10 +1092,16 @@ function buildVegetation(ctx, nature) {
   ctx.scene.add(flowerMesh);
 }
 
+// 花の密度だけ品質でスケール(草は buildGrassSystem が枚数・半径ごと再構築する)
 function applyGrassQuality(q) {
   const mul = clamp(q?.grassMul ?? 1, 0.05, 1);
-  if (grassMesh) grassMesh.count = Math.max(200, Math.floor(GRASS_MAX * mul));
   if (flowerMesh) flowerMesh.count = Math.max(80, Math.floor(FLOWER_MAX * (0.4 + mul * 0.6)));
+}
+
+// 'quality-changed': 追従グラスを新しい枚数・半径で再構築し、花密度も追従
+function onGrassQualityChanged(ctx, q) {
+  buildGrassSystem(ctx, clamp(q?.grassMul ?? 1, 0.1, 1));
+  applyGrassQuality(q);
 }
 
 // ---------------- init / update ----------------
@@ -1005,13 +1130,14 @@ export async function init(ctx) {
   ctx.getGroundHeight = getHeight;
 
   applyGrassQuality(ctx.quality);
-  ctx.on('quality-changed', (q) => applyGrassQuality(q));
+  ctx.on('quality-changed', (q) => onGrassQualityChanged(ctx, q));
 }
 
 export function update(ctx, dt) {
-  // 軽量アニメーションのみ: 草の風・水面の波・溶岩のゆらぎ
+  // 軽量アニメーションのみ: 草の風・追従巻き取り・水面の波・溶岩のゆらぎ
   waterUniform.value += dt;
   grassUniform.value += dt;
+  updateGrass(ctx); // プレイヤー追従で草の海を巻き取る(はみ出た列/行のみ再計算)
   if (lavaTex) {
     lavaTex.offset.x += dt * 0.009;
     lavaTex.offset.y += dt * 0.006;
