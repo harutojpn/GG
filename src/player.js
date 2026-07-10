@@ -157,7 +157,7 @@ function buildModel() {
     V2(0.10, 0.55), V2(0.001, 0.56),
   ];
   ol(part(new THREE.LatheGeometry(torsoProfile, 18), M.tunic, 0, 0, 0, torso), 0.016); // 胴チュニック
-  const skirtProfile = [V2(0.192, 0.055), V2(0.235, -0.05), V2(0.30, -0.17), V2(0.338, -0.265)];
+  const skirtProfile = [V2(0.338, -0.265), V2(0.30, -0.17), V2(0.235, -0.05), V2(0.192, 0.055)]; // y昇順=外向き法線
   const skirt = ol(part(new THREE.LatheGeometry(skirtProfile, 18), M.tunic, 0, 0, 0, torso), 0.016); // 広がる裾
   part(new THREE.CylinderGeometry(0.342, 0.352, 0.05, 18, 1, true), M.tunicDk, 0, -0.262, 0, torso);  // 裾の暗色縁
   part(new THREE.CylinderGeometry(0.214, 0.224, 0.078, 18), M.dark, 0, 0.02, 0, torso);   // ベルト(革)
@@ -165,9 +165,9 @@ function buildModel() {
   part(new THREE.CylinderGeometry(0.026, 0.026, 0.02, 8), M.emblem, 0, 0.02, 0.23, torso).rotation.x = Math.PI / 2; // 宝石
   part(new THREE.CylinderGeometry(0.062, 0.08, 0.10, 12), M.skin, 0, 0.55, 0, torso);      // 首
   ol(part(new THREE.CylinderGeometry(0.112, 0.16, 0.085, 16), M.tunicDk, 0, 0.505, 0, torso), 0.012); // 襟
-  // 胸元の飾り紐(V字)
-  part(new THREE.BoxGeometry(0.012, 0.16, 0.014), M.cream, -0.03, 0.40, 0.20, torso).rotation.z = 0.28;
-  part(new THREE.BoxGeometry(0.012, 0.16, 0.014), M.cream, 0.03, 0.40, 0.20, torso).rotation.z = -0.28;
+  // 襟元のV字トリム(同系の暗緑で控えめに)
+  part(new THREE.BoxGeometry(0.014, 0.10, 0.016), M.tunicDk, -0.028, 0.452, 0.188, torso).rotation.z = 0.44;
+  part(new THREE.BoxGeometry(0.014, 0.10, 0.016), M.tunicDk, 0.028, 0.452, 0.188, torso).rotation.z = -0.44;
   // 背中の鞘・盾アンカー(柄が右肩上・切先が左腰)
   backSheath = new THREE.Group();
   backSheath.position.set(-0.15, 0.50, -0.185);
@@ -182,7 +182,7 @@ function buildModel() {
   torso.add(backShieldG);
 
   // --- 腕(丸い肩+クリーム袖+革の篭手+拳) ---
-  const shoulderGeo = new THREE.SphereGeometry(0.10, 14, 11);
+  const shoulderGeo = new THREE.SphereGeometry(0.095, 14, 11);
   const upperGeo = new THREE.CapsuleGeometry(0.052, 0.17, 4, 12);
   const elbowGeo = new THREE.SphereGeometry(0.056, 10, 8);
   const foreGeo = new THREE.CylinderGeometry(0.05, 0.072, 0.235, 12);
@@ -190,8 +190,8 @@ function buildModel() {
   const handGeo = new THREE.SphereGeometry(0.062, 12, 9);
   const mkArm = (sx) => {
     const sh = new THREE.Group(); sh.position.set(sx * 0.265, 0.50, 0); torso.add(sh);
-    const pad = ol(part(shoulderGeo, M.tunic, sx * 0.006, 0.02, 0, sh), 0.012); // 丸い肩(チュニック)
-    pad.scale.set(1.06, 0.9, 1.0);
+    const pad = ol(part(shoulderGeo, M.tunic, sx * 0.006, 0.005, 0, sh), 0.012); // 肩の短い袖口(チュニック)
+    pad.scale.set(1.18, 0.66, 1.0);
     ol(part(upperGeo, M.cream, 0, -0.15, 0, sh), 0.011);                        // 二の腕(クリーム袖)
     const elb = new THREE.Group(); elb.position.set(0, -0.28, 0); sh.add(elb);
     part(elbowGeo, M.cream, 0, 0, 0, elb);                                      // 肘の丸み
@@ -232,11 +232,12 @@ function buildModel() {
   eyeR = mkEye(-1); eyeL = mkEye(1);
   // 眉(まばたきの影響を受けない別メッシュ)
   const browGeo = new THREE.BoxGeometry(0.062, 0.017, 0.02);
-  part(browGeo, M.brow, -0.064, 0.162, 0.148, headG).rotation.z = -0.16;
-  part(browGeo, M.brow, 0.064, 0.162, 0.148, headG).rotation.z = 0.16;
-  // 口(かすかな微笑み)
-  part(new THREE.BoxGeometry(0.03, 0.012, 0.018), M.mouth, -0.02, 0.028, 0.152, headG).rotation.z = 0.32;
-  part(new THREE.BoxGeometry(0.03, 0.012, 0.018), M.mouth, 0.02, 0.028, 0.152, headG).rotation.z = -0.32;
+  part(browGeo, M.brow, -0.063, 0.153, 0.15, headG).rotation.z = -0.12;
+  part(browGeo, M.brow, 0.063, 0.153, 0.15, headG).rotation.z = 0.12;
+  // 口(繋がった一本のかすかな微笑み)
+  part(new THREE.BoxGeometry(0.052, 0.013, 0.016), M.mouth, 0, 0.028, 0.153, headG);
+  part(new THREE.BoxGeometry(0.02, 0.012, 0.016), M.mouth, -0.03, 0.035, 0.15, headG).rotation.z = 0.55;
+  part(new THREE.BoxGeometry(0.02, 0.012, 0.016), M.mouth, 0.03, 0.035, 0.15, headG).rotation.z = -0.55;
   // 金髪の房(前髪・もみあげ・えり足)
   const lockGeo = new THREE.ConeGeometry(0.052, 0.15, 7);
   const addLock = (x, y, z, rx, rz, s, mat) => {
