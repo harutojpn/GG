@@ -143,6 +143,14 @@ export function rimToon(color, opts = {}) {
     shader.uniforms.uRimColor = uRim;
     shader.uniforms.uRimStrength = uStr;
     shader.uniforms.uRimPower = uPow;
+    // GLSL側に uniform 宣言を注入(共通チャンクの直後)。宣言漏れだとコンパイルに失敗する。
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>
+       uniform vec3 uRimColor;
+       uniform float uRimStrength;
+       uniform float uRimPower;`
+    );
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <opaque_fragment>',
       `#include <opaque_fragment>

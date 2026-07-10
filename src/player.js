@@ -284,14 +284,14 @@ function buildModel() {
   const body = ol(part(new THREE.CylinderGeometry(0.255, 0.235, 0.05, 26), M.shieldF, 0, 0, 0, shield), 0.012);
   body.rotation.x = Math.PI / 2;                                                             // 盤面(薄い円盤)
   const dome = part(new THREE.SphereGeometry(0.242, 26, 13, 0, Math.PI * 2, 0, Math.PI * 0.5), M.shieldF, 0, 0, 0.004, shield);
-  dome.rotation.x = -Math.PI / 2; dome.scale.set(1, 1, 0.26);                                 // 前面のふくらみ(ベベル)
+  dome.rotation.x = Math.PI / 2; dome.scale.set(1, 1, 0.26);                                  // 前面のふくらみ(ベベル)
   ol(part(new THREE.TorusGeometry(0.248, 0.028, 10, 30), M.gold, 0, 0, 0.012, shield), 0.008); // 金の縁
   for (let i = 0; i < 8; i++) {                                                              // 縁のリベット
     const a = i / 8 * Math.PI * 2;
     part(new THREE.SphereGeometry(0.017, 7, 6), M.gold, Math.cos(a) * 0.206, Math.sin(a) * 0.206, 0.03, shield);
   }
   const boss = part(new THREE.SphereGeometry(0.062, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), M.gold, 0, 0, 0.052, shield);
-  boss.rotation.x = -Math.PI / 2;                                                            // 中央ボス(金の半球)
+  boss.rotation.x = Math.PI / 2;                                                             // 中央ボス(金の半球)
   const emb = part(new THREE.CylinderGeometry(0.088, 0.088, 0.02, 3), M.emblem, 0, 0.004, 0.05, shield); // エンブレム(発光三角)
   emb.rotation.set(Math.PI / 2, 0, Math.PI);
   part(new THREE.SphereGeometry(0.03, 12, 10), M.orb, 0, 0.004, 0.075, shield);              // 中心の宝珠
