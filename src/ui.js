@@ -135,6 +135,7 @@ function onState(d) {
   closeModal(true);
   const inGame = to === 'playing' || to === 'shrine' || to === 'boss';
   R.hud.classList.toggle('on', inGame);
+  if (inGame) wakeHud();
 
   if (to === 'title') showScreen(R.title); else hideScreen(R.title);
   if (to === 'paused') { fillPauseStats(); showScreen(R.pause); } else hideScreen(R.pause);
@@ -160,10 +161,16 @@ function buildDefs() {
   const d = el('div', 'svg-defs', root);
   d.innerHTML = `<svg width="0" height="0" aria-hidden="true"><defs>
     <linearGradient id="ui-hgrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ff7583"/><stop offset=".5" stop-color="#dd2a41"/><stop offset="1" stop-color="#9c1128"/>
+      <stop offset="0" stop-color="#ff9aa2"/><stop offset=".42" stop-color="#e2465a"/><stop offset="1" stop-color="#9a2136"/>
     </linearGradient>
+    <radialGradient id="ui-hsheen" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="rgba(255,255,255,.85)"/><stop offset="1" stop-color="rgba(255,255,255,0)"/>
+    </radialGradient>
     <linearGradient id="ui-ggrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#a8f0be"/><stop offset=".45" stop-color="#4fc47a"/><stop offset="1" stop-color="#1e7a48"/>
+      <stop offset="0" stop-color="#c6f4d5"/><stop offset=".45" stop-color="#5cc488"/><stop offset="1" stop-color="#217c4d"/>
+    </linearGradient>
+    <linearGradient id="ui-stgrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8bf1e0"/><stop offset=".55" stop-color="#3fd9c4"/><stop offset="1" stop-color="#23b7a2"/>
     </linearGradient>
   </defs></svg>`;
 }
@@ -217,7 +224,7 @@ function renderHearts(hp, maxHp) {
   for (let i = 0; i < maxHp; i++) {
     const v = hp - i;
     const cls = v >= 1 ? 'full' : v >= 0.5 ? 'half' : 'empty';
-    html += `<svg class="heart ${cls}" viewBox="0 0 24 22"><path class="hb" d="${HEART_D}"/><path class="hf" d="${HEART_D}" fill="url(#ui-hgrad)"/></svg>`;
+    html += `<svg class="heart ${cls}" viewBox="0 0 24 22"><path class="hb" d="${HEART_D}"/><path class="hf" d="${HEART_D}" fill="url(#ui-hgrad)"/><ellipse class="hsheen" cx="8.4" cy="7" rx="3.1" ry="2" fill="url(#ui-hsheen)"/></svg>`;
   }
   R.hearts.innerHTML = html;
 }
@@ -226,6 +233,14 @@ function renderHearts(hp, maxHp) {
 let stShow = false, stFullT = 0, stEx = false, prevStOff = -1;
 // ---- 珠・緑石 ----
 let prevOrbs = -1, prevGems = -1;
+// ---- HUD静穏フェード(探索中は空気のように控えめに) ----
+let hudActiveT = 0, hudIdle = false;
+const HUD_IDLE_DELAY = 4.5; // 無操作でこの秒数後に薄れる
+function wakeHud(reason) {
+  hudActiveT = 0;
+  if (typeof window !== 'undefined') { window.__wake = window.__wake || {}; window.__wake[reason || '?'] = (window.__wake[reason || '?'] || 0) + 1; }
+  if (hudIdle) { hudIdle = false; if (R.hud) R.hud.classList.remove('idle'); }
+}
 
 function hudUpdate(dt) {
   const p = C.player;
@@ -237,6 +252,7 @@ function hudUpdate(dt) {
   if (hp !== prevHp || maxHp !== prevMax) {
     if (prevMax > 0 && maxHp > prevMax) retrigger(R.hearts, 'bless');
     renderHearts(hp, maxHp);
+    if (prevHp >= 0) wakeHud("hp");
     prevHp = hp; prevMax = maxHp;
   }
 
@@ -271,6 +287,7 @@ function hudUpdate(dt) {
         }
       } else o.classList.remove('lit');
     }
+    if (prevOrbs >= 0) wakeHud("orb");
     prevOrbs = orbs;
   }
 
@@ -278,19 +295,29 @@ function hudUpdate(dt) {
   const gems = p.gems | 0;
   if (gems !== prevGems) {
     R.gemCount.textContent = gems;
-    if (prevGems >= 0 && gems > prevGems) retrigger(R.gems, 'pop');
+    if (prevGems >= 0 && gems > prevGems) { retrigger(R.gems, "pop"); wakeHud("gem"); }
     prevGems = gems;
   }
+
+  // 静穏フェード: 戦闘・スタミナ消費・プロンプト・低HP・会話中は常時鮮明、
+  // それ以外(平穏な移動・探索)ではハートとミニマップだけを薄く残して世界に溶け込ませる
+  const busy = boss.visible || stShow || !!promptCur || lowHp || dlg.active;
+  if (busy) hudActiveT = 0; else hudActiveT += dt;
+  const idle = !busy && hudActiveT > HUD_IDLE_DELAY;
+  if (idle !== hudIdle) { hudIdle = idle; R.hud.classList.toggle('idle', idle); }
+  if (typeof window !== 'undefined') window.__hud = { activeT: Math.round(hudActiveT * 10) / 10, busy, idle, bv: boss.visible, ss: stShow, pc: !!promptCur, lh: lowHp, da: dlg.active };
 
   drawMinimap();
 }
 
 function onDamaged() {
+  wakeHud();
   retrigger(R.hearts, 'hurt');
   flash('rgba(186,26,42,1)', 0.16);
 }
 
 function onPickup(d) {
+  wakeHud();
   const kind = d && d.kind;
   let x = innerWidth * 0.5, y = innerHeight * 0.58;
   if (d && d.pos && C.camera) {
@@ -319,10 +346,11 @@ function buildMinimapBase() {
   try {
     const g = R.mapCanvas.getContext('2d');
     map.g = g;
-    const sh = g.createRadialGradient(85, 85, 28, 85, 85, 85);
-    sh.addColorStop(0, 'rgba(6,10,12,0)');
-    sh.addColorStop(0.78, 'rgba(6,10,12,.1)');
-    sh.addColorStop(1, 'rgba(6,10,12,.46)');
+    const sh = g.createRadialGradient(85, 85, 22, 85, 85, 85);
+    sh.addColorStop(0, 'rgba(8,12,14,.05)');
+    sh.addColorStop(0.62, 'rgba(8,12,14,.16)');
+    sh.addColorStop(0.86, 'rgba(7,10,12,.4)');
+    sh.addColorStop(1, 'rgba(6,9,11,.66)');
     map.shade = sh;
 
     const world = C.world;
@@ -346,11 +374,12 @@ function buildMinimapBase() {
       }
     }
     const span = Math.max(1, hmax - hmin);
+    // 落ち着いた低彩度トーン(世界に溶け込む上品な地図)
     const COL = {
-      plains: [96, 152, 78], forest: [50, 104, 78], lake: [70, 140, 168],
-      volcano: [116, 66, 52], castle: [80, 70, 100], ruins: [130, 124, 108],
+      plains: [92, 118, 82], forest: [58, 92, 74], lake: [76, 116, 134],
+      volcano: [112, 78, 66], castle: [88, 80, 102], ruins: [120, 114, 100],
     };
-    const WATER = [46, 106, 142];
+    const WATER = [64, 102, 122];
     const wl = typeof world.waterLevel === 'number' ? world.waterLevel : -1e9;
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
@@ -360,7 +389,7 @@ function buildMinimapBase() {
         try { biome = world.getBiome(x, z) || 'plains'; } catch (e) { /* noop */ }
         const h = hs[j * N + i];
         const c = h <= wl + 0.15 ? WATER : (COL[biome] || COL.plains);
-        const b = 0.6 + 0.52 * ((h - hmin) / span);
+        const b = 0.66 + 0.34 * ((h - hmin) / span);
         const o = (j * N + i) * 4;
         img.data[o] = Math.min(255, c[0] * b);
         img.data[o + 1] = Math.min(255, c[1] * b);
@@ -384,9 +413,9 @@ function mapDiamond(g, x, y, r, color) {
   g.translate(x, y);
   g.rotate(Math.PI / 4);
   g.shadowColor = color;
-  g.shadowBlur = 6;
+  g.shadowBlur = 5;
   g.fillStyle = color;
-  g.fillRect(-r * 0.72, -r * 0.72, r * 1.44, r * 1.44);
+  g.fillRect(-r * 0.7, -r * 0.7, r * 1.4, r * 1.4);
   g.restore();
 }
 
@@ -410,7 +439,7 @@ function drawMinimap() {
     for (let i = 0; i < list.length; i++) {
       const sh = list[i];
       if (!sh || !sh.pos) continue;
-      mapDiamond(g, c + sh.pos.x * k, c + sh.pos.z * k, 4.4, sh.completed ? '#eccb66' : '#3fe6d2');
+      mapDiamond(g, c + sh.pos.x * k, c + sh.pos.z * k, 4, sh.completed ? '#e9cd75' : '#3fe0c8');
     }
   }
   // 魔城 ▲(紫)
@@ -452,29 +481,29 @@ function drawMinimap() {
   }
   g.restore();
 
-  // 金の縁 + 北方位
+  // 金の細縁(細く控えめに) + 北方位
   g.beginPath();
   g.arc(c, c, rad, 0, Math.PI * 2);
-  g.strokeStyle = 'rgba(201,162,39,.8)';
-  g.lineWidth = 1.3;
-  g.stroke();
-  g.beginPath();
-  g.arc(c, c, rad - 3.5, 0, Math.PI * 2);
-  g.strokeStyle = 'rgba(201,162,39,.22)';
+  g.strokeStyle = 'rgba(201,162,39,.62)';
   g.lineWidth = 1;
   g.stroke();
   g.beginPath();
-  g.arc(c, c - rad + 10, 8, 0, Math.PI * 2);
-  g.fillStyle = 'rgba(8,12,15,.82)';
+  g.arc(c, c, rad - 2.6, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(233,205,117,.14)';
+  g.lineWidth = 0.8;
+  g.stroke();
+  g.beginPath();
+  g.arc(c, c - rad + 9, 6.6, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(8,12,15,.7)';
   g.fill();
-  g.strokeStyle = 'rgba(201,162,39,.55)';
-  g.lineWidth = 1;
+  g.strokeStyle = 'rgba(201,162,39,.42)';
+  g.lineWidth = 0.8;
   g.stroke();
-  g.font = '10px serif';
+  g.font = '9px serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillStyle = '#ecc966';
-  g.fillText('北', c, c - rad + 10.5);
+  g.fillStyle = 'rgba(236,201,102,.92)';
+  g.fillText('北', c, c - rad + 9.4);
 }
 
 // ================================================================
